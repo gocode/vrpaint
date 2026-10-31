@@ -104,6 +104,7 @@ depuis GitHub Pages ; la diffusion native fait le même travail sans coût pour 
 | Masquer la palette · Jour/Nuit | X · Y |
 | Secouer la bombe | secouer la manette (bruit de bille) |
 | Changer d'outil | onglet **Outils** de la palette ; gâchette latérale (grip) de la main droite = bombe ⇄ dernier outil |
+| Revenir au navigateur | **Quitter la VR** en haut à droite de la palette, puis **Confirmer ?** dans les 3 s (ou bouton Meta de la manette droite, puis « Quitter ») ; le projet est enregistré à la sortie |
 
 **Caches** (outil « Caches ») :
 | Action | Commande |
@@ -127,7 +128,9 @@ Palette à 6 onglets :
 - **Réglages** : annuler, effacer, nuit, coulures, viseur, main droite/gauche, type et taille du mur ;
 - **Projets** : nouveau, enregistrer, ouvrir (les projets du PC, communs au PC et au casque).
 
-Les caps et le potentiomètre de largeur restent visibles en bas, quel que soit l'onglet.
+Les caps et le potentiomètre de largeur restent visibles en bas, quel que soit l'onglet, comme **Quitter la VR** en haut.
+`node tests/sortie-vr.mjs` vérifie, sur une séance simulée, que ce bouton est présent sur chaque onglet sans rien
+chevaucher, qu'un appui seul ne quitte pas et que la sortie rend bien la page du navigateur.
 
 ### PC
 Clic gauche : peindre (Maj : pression légère) · molette : distance au mur · Maj + molette : angle du flat cap ·

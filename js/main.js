@@ -367,6 +367,8 @@ actions.removeMasks = () => {
 };
 actions.enterVR = () => enterXR('immersive-vr');
 actions.enterAR = () => enterXR('immersive-ar');
+// la fin de session passe par 'sessionend' plus bas, qui enregistre le projet
+actions.exitXR = () => renderer.xr.getSession()?.end();
 
 // --- WebXR -------------------------------------------------------------------
 async function enterXR(mode) {
