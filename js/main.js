@@ -11,7 +11,7 @@ import { XRControls } from './xr.js';
 import { VRPalette } from './vrui.js';
 import { buildUI, setXRSupport, toast } from './ui.js';
 import { SprayAudio } from './audio.js';
-import { saveProject, loadProject, listProjects, deleteProject, renameProject, newProjectId, moveLocalProjects } from './storage.js';
+import { saveProject, loadProject, listProjects, deleteProject, renameProject, newProjectId, moveLocalProjects, projectFile, importProjectFile } from './storage.js';
 import { runTest } from './test.js';
 import { History } from './history.js';
 import { CanvasManager } from './canvases.js';
@@ -229,6 +229,23 @@ async function refreshProjects() {
   }
 }
 
+async function currentProject(id) {
+  return {
+    id,
+    name: state.projectName,
+    wall: state.wall,
+    wallWidth: WALL.width,
+    wallHeight: WALL.height,
+    savedColors: state.savedColors,
+    thumb: wallImage(240).toDataURL('image/jpeg', 0.75),
+    layers: await surface.exportLayers(),
+    // devantures peintes de la rue
+    extra: Object.fromEntries(await Promise.all(canvases.painted().map(async c => [c.id, await c.surface.exportLayers()]))),
+    refs: state.refs,
+    masks: stencils.serialize(),
+  };
+}
+
 async function saveCurrent(manual = false) {
   if (saving) await saving;
   if (!dirty && !manual) return;
@@ -236,20 +253,7 @@ async function saveCurrent(manual = false) {
   saving = (async () => {
     try {
       const id = state.projectId || newProjectId();
-      const rec = await saveProject({
-        id,
-        name: state.projectName,
-        wall: state.wall,
-        wallWidth: WALL.width,
-        wallHeight: WALL.height,
-        savedColors: state.savedColors,
-        thumb: wallImage(240).toDataURL('image/jpeg', 0.75),
-        layers: await surface.exportLayers(),
-        // devantures peintes de la rue
-        extra: Object.fromEntries(await Promise.all(canvases.painted().map(async c => [c.id, await c.surface.exportLayers()]))),
-        refs: state.refs,
-        masks: stencils.serialize(),
-      });
+      const rec = await saveProject(await currentProject(id));
       // projet enregistré entre-temps sur l'autre appareil : cette version a été gardée à part
       if (rec.id !== id) notify(`Modifié aussi sur l'autre appareil : ta version devient « ${rec.name} »`);
       if (state.projectId !== rec.id || state.projectName !== rec.name) set({ projectId: rec.id, projectName: rec.name });
@@ -319,7 +323,37 @@ async function removeProject(id) {
   notify('Projet supprimé');
 }
 
+// Fichier .vrpaint sur l'appareil, pour reprendre le projet plus tard ailleurs ou si le
+// navigateur a effacé ses projets (version en ligne). Le projet est d'abord enregistré :
+// le fichier porte la même version, et le rouvrir ici ne crée pas de doublon.
+async function downloadProjectFile() {
+  await saveCurrent();
+  const id = state.projectId || newProjectId();
+  const blob = await projectFile({ ...await currentProject(id), date: !dirty && id === loadedId ? loadedDate : Date.now() });
+  const a = document.createElement('a');
+  a.download = `${(state.projectName || 'vrpaint').replace(/[^\p{L}\p{N}_-]+/gu, '_')}.vrpaint`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30e3);
+  notify(`« ${state.projectName} » téléchargé`);
+}
+
+async function openProjectFile(file) {
+  try {
+    const { id, known } = await importProjectFile(file);
+    await refreshProjects();
+    const name = (state.projects || []).find(p => p.id === id)?.name || file.name;
+    if (known && id === loadedId && !dirty) notify(`« ${name} » est déjà ouvert, dans cette version`);
+    else await openProject(id, known ? `« ${name} » était déjà dans la liste : ouvert` : `« ${name} » ajouté depuis le fichier`);
+  } catch (e) {
+    console.warn('Fichier de projet illisible', e);
+    notify(`Fichier illisible : ${e.message}`);
+  }
+}
+
 actions.newProject = newProject;
+actions.downloadProject = downloadProjectFile;
+actions.openProjectFile = openProjectFile;
 actions.openProject = id => openProject(id);
 actions.refreshProjects = refreshProjects;
 actions.deleteProject = removeProject;

@@ -427,8 +427,10 @@ export class VRPalette {
 
   _draw_projects(reg) {
     const c = this.ctx;
-    this._button(reg({ type: 'btn', id: 'newProject', x: 32, y: 240, w: 470, h: 96 }), 'Nouveau projet');
-    this._button(reg({ type: 'btn', id: 'save', x: 522, y: 240, w: 470, h: 96 }), 'Enregistrer');
+    this._button(reg({ type: 'btn', id: 'newProject', x: 32, y: 240, w: 306, h: 96 }), 'Nouveau');
+    this._button(reg({ type: 'btn', id: 'save', x: 359, y: 240, w: 306, h: 96 }), 'Enregistrer');
+    // fichier .vrpaint dans les téléchargements du casque (le rouvrir : panneau du navigateur)
+    this._button(reg({ type: 'btn', id: 'downloadProject', x: 686, y: 240, w: 306, h: 96 }), 'Télécharger');
     const list = (state.projects || []).slice(0, 7);
     if (!list.length) this._text('Aucun projet enregistré pour l\'instant.', 32, 400, 30);
     list.forEach((p, i) => {
@@ -528,6 +530,7 @@ export class VRPalette {
       save: () => actions.save(),
       photo: () => actions.photo(),
       newProject: () => actions.newProject(),
+      downloadProject: () => actions.downloadProject(),
       wallPrev: () => set({ wall: WALLS[(i - 1 + WALLS.length) % WALLS.length].id }),
       wallNext: () => set({ wall: WALLS[(i + 1) % WALLS.length].id }),
       decW: () => { this.pendW = clamp(this.pendW - wStep, wMin, wMax); this.draw(); },

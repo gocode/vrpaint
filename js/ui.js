@@ -127,6 +127,10 @@ export function buildUI() {
       </div>
       <ul class="projects" id="projects"></ul>
       <p class="help" id="projects-where"></p>
+      <div class="actions">
+        <button type="button" data-action="downloadProject" title="Garder ce projet dans un fichier .vrpaint sur cet appareil">Télécharger</button>
+        <label class="file-btn" title="Reprendre un projet téléchargé">Ouvrir un fichier<input type="file" id="project-file" accept=".vrpaint,application/octet-stream"></label>
+      </div>
     </section>
     <section class="xr">
       <button type="button" id="enter-vr" class="primary" disabled>Entrer en VR</button>
@@ -206,6 +210,11 @@ export function buildUI() {
   };
   $('#wall-w').addEventListener('input', sizeInput);
   $('#wall-h').addEventListener('input', sizeInput);
+  $('#project-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) actions.openProjectFile(file);
+  });
   $('#project-name').addEventListener('change', e => actions.renameProject(e.target.value.trim() || 'Sans titre'));
   for (const id of ['night', 'drips', 'aim']) $('#' + id).addEventListener('change', e => set({ [id]: e.target.checked }));
   $('#ref-file').addEventListener('change', async e => {
@@ -327,7 +336,7 @@ export function buildUI() {
         </li>`).join('') || '<li class="help">Aucun projet enregistré.</li>';
       const where = projectsWhere();
       $('#projects-where').textContent = where === 'pc' ? 'Enregistrés sur le PC : les mêmes dans le casque.'
-        : where === 'navigateur' ? 'Enregistrés dans ce navigateur seulement (jeu non servi par le PC).' : '';
+        : where === 'navigateur' ? 'Enregistrés dans ce navigateur seulement (jeu non servi par le PC) : « Télécharger » en garde une copie.' : '';
     }
     const tool = TOOLS.find(t => t.id === state.tool);
     $('#hud').innerHTML = state.tool === 'cache'

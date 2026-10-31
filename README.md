@@ -289,6 +289,20 @@ devantures, type et taille du mur, couleurs perso, photos modèles, vignette.
   auto-signé). Ses projets restent dans le navigateur, comme avant. Le panneau du PC indique où sont rangés les projets
   (« Enregistrés sur le PC » ou « dans ce navigateur seulement »). `?local` force le rangement dans le navigateur.
 
+### Garder un projet dans un fichier
+
+Le navigateur peut effacer ses données (nettoyage, manque de place, navigation privée) : sur la version en ligne,
+c'est là que sont les projets. « Télécharger » (panneau du navigateur, et onglet Projets de la palette VR) enregistre le
+projet ouvert puis le télécharge en fichier `.vrpaint` (le même format que sur le PC : peinture du mur et des devantures,
+caches, couleurs perso, photos modèles). « Ouvrir un fichier » (panneau du navigateur) le remet dans la liste et l'ouvre,
+là où on en était. Il marche partout : version en ligne, PC, casque, d'un appareil à l'autre.
+
+- Le fichier est contrôlé avant d'être rangé (en-tête, blocs complets, couches intactes) : un fichier abîmé est refusé.
+- Rouvrir le fichier d'une version déjà dans la liste ne crée pas de doublon. Si la liste en a une autre version, le
+  fichier devient un projet à part « … (fichier) » : rien n'est écrasé.
+- Dans le casque, le fichier arrive dans les téléchargements du Quest ; pour le rouvrir, sortir de la VR et passer par
+  « Ouvrir un fichier » dans la page (le sélecteur de fichiers n'existe pas en VR).
+
 Détails techniques :
 - `projets.php` : un fichier `projets/<id>.vrpaint` par projet (dossier ignoré par git, à sauvegarder avec le PC).
   Format (`js/projectfile.js`) : `VRPAINT1`, longueur de l'en-tête, en-tête JSON (nom, date, mur, couleurs perso, vignette,
@@ -304,13 +318,16 @@ Détails techniques :
   ```
   Projet peint sur l'un et ouvert sur l'autre (empreintes des couches, couverture de peinture, image du mur, devanture,
   couleurs perso, photo), rechargement de la version enregistrée ailleurs, modification simultanée sans perte, copie des
-  anciens projets du navigateur, renommage et suppression. Affiche `PROJETS_OK` ou `PROJETS_ECHEC` (environ 4 min ;
+  anciens projets du navigateur, renommage et suppression, puis fichier `.vrpaint` téléchargé et rouvert identique dans
+  un navigateur neuf sans le PC (sans doublon la seconde fois, fichier tronqué refusé). Affiche `PROJETS_OK` ou `PROJETS_ECHEC` (environ 4 min ;
   `--rapide` remplace la peinture scriptée par des rayures). Utilise `playwright-core` (variable `PLAYWRIGHT_CORE`).
 
 À essayer dans le casque (non vérifiable en headless) :
 - au premier lancement dans le navigateur du Quest (https://&lt;IP du PC&gt;/), les anciens projets du casque rejoignent la liste ;
 - un projet commencé sur le PC, repris dans le casque puis de nouveau sur le PC ;
-- le temps d'ouverture d'un grand mur en Wi-Fi et la mémoire du Quest 2.
+- le temps d'ouverture d'un grand mur en Wi-Fi et la mémoire du Quest 2 ;
+- « Télécharger » depuis la palette en VR (le fichier doit arriver dans les téléchargements du Quest), puis
+  « Ouvrir un fichier » dans la page du navigateur du casque.
 
 ## Architecture
 

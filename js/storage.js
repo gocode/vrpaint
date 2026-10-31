@@ -122,11 +122,16 @@ async function putOnServer(meta, data, base) {
 }
 
 // layers : mur principal ; extra : { idDevanture: couches } ; refs : modèles photo (Blob)
-// Rend la méta enregistrée : son id et son nom changent si la version a dû être gardée à part.
-export async function saveProject({ id, layers, extra = {}, refs = [], ...meta }) {
+async function toRecord({ id, layers, extra = {}, refs = [], date = Date.now(), ...meta }) {
   const data = { layers: await pack(layers), extra: {}, refs };
   for (const [cid, L] of Object.entries(extra)) data.extra[cid] = await pack(L);
-  const record = { ...meta, id, date: Date.now(), refCount: refs.length };
+  return { record: { ...meta, id, date, refCount: refs.length }, data };
+}
+
+// Rend la méta enregistrée : son id et son nom changent si la version a dû être gardée à part.
+export async function saveProject(project) {
+  const { record, data } = await toRecord({ ...project, date: Date.now() });
+  const { id } = record;
   if (!await onServer()) {
     await tx(['projects', 'meta'], 'readwrite', (p, m) => { p.put(data, id); m.put(record, id); });
     return record;
@@ -140,6 +145,29 @@ export async function saveProject({ id, layers, extra = {}, refs = [], ...meta }
     await putOnServer(copy, data, null);
     return copy;
   }
+}
+
+// Projet dans un fichier .vrpaint, à garder sur l'appareil : la version en ligne
+// (GitHub Pages) ne range ses projets que dans le navigateur, qui peut les effacer.
+export async function projectFile(project) {
+  const { record, data } = await toRecord(project);
+  return encodeProject({ meta: record, data });
+}
+
+// Fichier .vrpaint rangé dans la collection, contrôlé avant (couches complètes).
+// Même projet déjà présent dans la même version : rien à ranger. Présent dans une
+// autre version : le fichier devient un projet à part, rien n'est écrasé.
+// Rend { id, known } : known quand le projet était déjà là.
+export async function importProjectFile(blob) {
+  const { meta, data } = await decodeProject(blob);
+  await unpack(data.layers);
+  for (const L of Object.values(data.extra)) await unpack(L);
+  const same = (await listProjects()).find(p => p.id === meta.id);
+  if (same && same.date === meta.date) return { id: same.id, known: true };
+  const record = same ? { ...meta, id: newProjectId(), name: `${meta.name} (fichier)` } : meta;
+  if (await onServer()) await putOnServer(record, data, null);
+  else await tx(['projects', 'meta'], 'readwrite', (p, m) => { p.put(data, record.id); m.put(record, record.id); });
+  return { id: record.id, known: false };
 }
 
 export async function renameProject(id, name) {

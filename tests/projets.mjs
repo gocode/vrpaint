@@ -8,7 +8,9 @@
 //     couches (empreintes SHA-256), couverture de peinture, image du mur ;
 //   - B le modifie et l'enregistre : A, qui l'avait ouvert sans y toucher, recharge la nouvelle version ;
 //   - modifié des deux côtés à la fois : aucune version n'est perdue (l'une est gardée « … (copie PC) ») ;
-//   - renommage et suppression vus de l'autre côté.
+//   - renommage et suppression vus de l'autre côté ;
+//   - projet téléchargé en fichier .vrpaint, rouvert identique dans un navigateur neuf sans le PC,
+//     sans doublon s'il est rouvert deux fois ; fichier tronqué refusé.
 //
 //   node tests/projets.mjs            (environ 4 min ; PLAYWRIGHT_CORE = chemin de playwright-core si besoin)
 //   node tests/projets.mjs --rapide   (mur peint de rayures au lieu de la peinture scriptée)
@@ -202,11 +204,45 @@ try {
   const old = (await projects(A)).find(p => p.name === 'Ancien mur du casque');
   await A.evaluate(id => window.__vrpaint.actions.deleteProject(id), old.id);
   check(!(await projects(B)).some(p => p.id === old.id), 'suppression faite sur A visible sur B');
+
+  // 8. Fichier .vrpaint : téléchargé sur A, rouvert dans un navigateur neuf sans le PC
+  //    (comme la version en ligne, qui ne garde ses projets que dans le navigateur)
+  await A.evaluate(id => window.__vrpaint.actions.openProject(id), id);
+  await waitFor(A, id => window.__vrpaint.state.projectId === id, id, 'réouverture sur A');
+  const sigF = await signature(A);
+  const [dl] = await Promise.all([A.waitForEvent('download', { timeout: 5 * MIN }), A.click('[data-action="downloadProject"]')]);
+  const file = `tmp/projets-${C}.vrpaint`;
+  await dl.saveAs(file);
+  check(dl.suggestedFilename() === 'Mur_renommé.vrpaint', `fichier téléchargé : ${dl.suggestedFilename()}`);
+  await ctxB.close();   // B ne sert plus : une page de moins à rendre en logiciel
+  const ctxD = await browser.newContext({ viewport: { width: 820, height: 420 } });
+  const D = await ctxD.newPage();
+  D.on('pageerror', e => console.log(`[D] erreur page : ${e.message}`));
+  await D.goto(`http://localhost/VRpaint/?local&res=${RES}`, { waitUntil: 'domcontentloaded', timeout: 5 * MIN });
+  await ready(D);
+  await D.setInputFiles('#project-file', file);
+  await waitFor(D, id => window.__vrpaint.state.projectId === id, id, 'ouverture du fichier sur D');
+  same(sigF, await signature(D), 'fichier rouvert dans un navigateur neuf, sans le PC');
+  check(await D.evaluate(() => document.querySelector('#projects-where').textContent.includes('navigateur')), 'panneau de D : « Enregistrés dans ce navigateur »');
+  // le même fichier une seconde fois, ici et sur A : déjà dans la liste, pas de doublon
+  await D.setInputFiles('#project-file', file);
+  await A.setInputFiles('#project-file', file);
+  await A.waitForTimeout(3000);
+  const countOf = async P => (await projects(P)).filter(p => p.name.startsWith('Mur renommé')).length;
+  check(await countOf(D) === 1 && await countOf(A) === 1, 'fichier rouvert une seconde fois : pas de doublon');
+  // fichier abîmé : refusé, rien n'est ajouté
+  const fs = await import('node:fs');
+  const buf = fs.readFileSync(file);
+  await D.setInputFiles('#project-file', { name: 'abime.vrpaint', mimeType: 'application/octet-stream', buffer: buf.subarray(0, buf.length >> 1) });
+  await D.waitForTimeout(3000);
+  check((await projects(D)).length === 1, 'fichier tronqué refusé');
+  fs.rmSync(file, { force: true });
+  await ctxD.close();
 } catch (e) {
   failures++;
   console.log(`ECHEC ${e.message}`);
   await A.screenshot({ path: 'tmp/projets-A.png' }).catch(() => {});
-  await B.screenshot({ path: 'tmp/projets-B.png' }).catch(() => {});
+  await B.screenshot({ path: 'tmp/projets-B.png' }).catch(() => {});   // B peut être déjà fermé
 } finally {
   await A.evaluate(c => fetch(`projets.php?projets=${c}&vider`, { method: 'POST' }), C).catch(() => {});
   await browser.close();
