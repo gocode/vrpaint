@@ -1,6 +1,6 @@
 # VRpaint — graffiti en réalité virtuelle
 
-Un mur (8 m × 3 m par défaut, réglable) et les devantures de la rue à peindre à la bombe, dans le casque Meta Quest (WebXR) ou à la souris sur PC.
+Un mur (8 m × 3 m par défaut, réglable) et les devantures de la rue à peindre à la bombe, dans le casque Meta Quest (WebXR) ou à la souris sur PC, ou au doigt sur téléphone et tablette.
 Aucune installation ni compilation : du HTML/JavaScript servi par WAMP, Three.js chargé depuis le CDN jsDelivr.
 
 ## Lancer
@@ -140,6 +140,44 @@ Outils : B = bombe · M = caches · R = racloir suivant (couteau, spatule, gratt
   molette sur un cache = taille · Maj + molette = rotation · Suppr = le retirer. Sans cache sous le pointeur, la molette
   règle la taille du prochain cache et Maj + molette son angle.
 - Racloirs : glisser sur le mur · molette = pression · Maj + molette = angle de la lame (curseur « Angle »).
+
+### Téléphone et tablette (au doigt)
+Chaque geste a un seul rôle, pour qu'aucun ne déclenche l'autre :
+
+| Geste | Effet |
+|---|---|
+| **Un doigt** | peindre (avec les caches : poser ou déplacer un cache ; avec un racloir : racler). Une tape brève fait un point. |
+| **Deux doigts qui glissent** | regarder autour : on « attrape » le décor, qui suit les doigts (glisser vers le bas lève la tête). |
+| **Pincer / écarter** | largeur du jet de la bombe (30 à 250 %), avec une bulle « Jet 120 % · ≈ 18 cm » et l'anneau du viseur qui suit. Avec les caches : taille du cache touché, et en tournant les doigts son angle (sans cache sous les doigts : taille du prochain). Avec un racloir : pression. |
+| **Croix en bas à gauche** | avancer, reculer, se décaler, y compris en diagonale. Elle est progressive : plus le pouce s'éloigne du centre, plus on va vite. |
+| **⤒ ⤓** | monter, descendre la nacelle. |
+
+Garde-fous :
+- **Pas de peinture parasite.** Un doigt seul ne peint qu'après 120 ms, ou dès qu'il glisse de plus de 10 px. Un deuxième
+  doigt posé dans ce délai n'a donc rien laissé. Le trait part quand même bien du point de contact.
+- Un geste à deux doigts se décide dès le départ : **glisser** si le milieu bouge d'abord de 18 px, **pincer** si l'écart
+  change d'abord de 22 px. Un glisser à deux doigts un peu ouvert ne change pas la largeur en passant.
+- Lever un doigt ne relance pas la peinture : il faut lever les deux pour revenir au pinceau.
+- **Pas de zoom ni de défilement de la page.** Pour cela : `touch-action: none` sur la scène et la croix,
+  `touch-action: pan-y` sur le panneau, `maximum-scale=1` (pas de zoom automatique d'iOS sur les champs) et
+  `gesturestart` bloqué pour Safari.
+- **Petit écran.** Le bouton ☰ ouvre le panneau, qui recouvre la croix. Toucher la scène à côté le referme, sans peindre.
+
+Réglages, dans la section **Écran tactile** du panneau (visible seulement sur un écran tactile) :
+- **Deux doigts : glisser le long du mur.** Au lieu de tourner la tête, on se déplace parallèlement au mur ;
+  le mur suit les doigts.
+- **Pincer : avancer / reculer.** Écarter les doigts rapproche du mur ; le mur grossit autant que l'écart. La largeur se
+  règle alors avec le curseur « Largeur du jet ».
+- Afficher ou masquer la croix.
+
+La souris et le clavier ne passent pas par ce code : sur PC, rien ne change. La croix n'apparaît qu'avec un écran
+tactile, détecté par `pointer: coarse` ou au premier contact d'un doigt.
+
+Contrôle automatique : Chrome headless avec GPU, sans fenêtre. Il émule un téléphone et envoie de vrais événements
+tactiles CDP. Il vérifie chaque geste ci-dessus, la souris et le clavier du PC, puis `?test`. Captures dans `tmp/tactile/`.
+```bash
+node tests/tactile.mjs
+```
 
 ## Ce qui est simulé
 
@@ -295,6 +333,7 @@ Détails techniques :
 | `js/vrui.js` | Palette tenue en main en VR (canvas texturé, 6 onglets) |
 | `js/spectator.js` | Vue spectateur sur l'écran du PC pendant une session Link (casque lissé, vue du mur, silhouette du peintre) |
 | `js/desktop.js`, `js/ui.js` | Mode PC : souris/clavier et panneau d'outils |
+| `js/touch.js` | Écran tactile : un doigt peint, gestes à deux doigts, croix de déplacement, bulle du pincement |
 | `js/state.js` | État partagé, couleurs perso, préférences (localStorage) |
 | `js/storage.js` | Projets : sur le PC (projets.php) ou dans le navigateur (IndexedDB), couches compressées gzip, reprise des anciens projets |
 | `js/audio.js` | Souffle de la bombe et cliquetis de la bille (Web Audio, sans fichier son) |

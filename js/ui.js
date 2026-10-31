@@ -81,6 +81,16 @@ export function buildUI() {
       <label class="slider" id="angle-row">Angle (flat cap, lame, cache) <output id="o-angle"></output>
         <input type="range" id="angle" min="-90" max="90" step="5"></label>
     </section>
+    <section class="touch-only">
+      <h2>Écran tactile</h2>
+      <label class="row">Deux doigts <select id="touch-drag">
+        <option value="regarder">regarder autour</option><option value="glisser">glisser le long du mur</option></select></label>
+      <label class="row">Pincer <select id="touch-pinch">
+        <option value="largeur">largeur de l'outil</option><option value="avancer">avancer / reculer</option></select></label>
+      <label class="check"><input type="checkbox" id="touch-pad-on"> Croix de déplacement</label>
+      <p class="help">Un doigt peint. Pincer règle le jet de la bombe, la taille du cache touché (en tournant : son angle)
+        ou la pression du racloir. Toucher la scène referme ce panneau.</p>
+    </section>
     <section>
       <h2>Mur et ambiance</h2>
       <label class="row">Mur <select id="wall">${WALLS.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}</select></label>
@@ -136,6 +146,8 @@ export function buildUI() {
         <li><b>B</b> : bombe · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir)</li>
         <li>Caches : <b>clic</b> poser / déplacer · <b>molette</b> taille · <b>Maj + molette</b> rotation · <b>Suppr</b> retirer</li>
         <li><b>N</b> : nuit · <b>V</b> : viseur · <b>C</b> : coulures · <b>X</b> : secouer</li>
+        <li>Au doigt : <b>un doigt</b> peint · <b>deux doigts</b> regardent autour · <b>pincer</b> : largeur du jet ·
+          <b>croix</b> : avancer, reculer, se décaler · <b>⤒ ⤓</b> : nacelle</li>
       </ul>
       <p class="help">Casque Quest : gâchette = peindre (pression analogique), viser la palette de l'autre main pour choisir. Toucher la pastille du haut pour personnaliser la couleur. Joystick gauche : marcher, droit : tourner / nacelle. A : viseur, B : annuler, X : palette, Y : nuit.</p>
     </details>`;
@@ -233,6 +245,9 @@ export function buildUI() {
     else document.documentElement.requestFullscreen?.().catch(() => toast('Plein écran refusé par le navigateur'));
     b.blur();
   });
+  $('#touch-drag').addEventListener('change', e => set({ touchDrag: e.target.value }));
+  $('#touch-pinch').addEventListener('change', e => set({ touchPinch: e.target.value }));
+  $('#touch-pad-on').addEventListener('change', e => set({ touchPad: e.target.checked }));
 
   let lastProjects = null, lastSaved = null, lastRefs = null;
   const sync = (patch = {}) => {
@@ -295,6 +310,10 @@ export function buildUI() {
     $('#night').checked = state.night;
     $('#drips').checked = state.drips;
     $('#aim').checked = state.aim;
+    $('#touch-drag').value = state.touchDrag;
+    $('#touch-pinch').value = state.touchPinch;
+    $('#touch-pad-on').checked = state.touchPad;
+    document.body.classList.toggle('pad-off', !state.touchPad);
     if (document.activeElement !== $('#project-name')) $('#project-name').value = state.projectName;
     if (lastProjects !== state.projects || 'projectId' in patch) {
       lastProjects = state.projects;

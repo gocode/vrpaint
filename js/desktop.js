@@ -3,6 +3,7 @@ import { state, set, actions, setTool } from './state.js';
 import { CAPS } from './spray.js';
 import { SCRAPERS, scraperById } from './scraper.js';
 import { MASK_SIZE } from './stencils.js';
+import { TouchControls } from './touch.js';
 
 const _f = new THREE.Vector3();
 const _r = new THREE.Vector3();
@@ -14,6 +15,7 @@ const ATTACK = 35 * DEG;   // angle de la lame sur le mur en mode souris
 // Mode souris / écran tactile. La bombe est tenue perpendiculaire au mur, à
 // state.distance de la surface visée par le pointeur. Avec les caches, un clic
 // pose (ou attrape) un cache ; avec un racloir, on racle en glissant.
+// Les doigts passent par TouchControls (touch.js), la souris et le stylet ici.
 export class DesktopControls {
   constructor({ camera, rig, canvas, world, audio, wall, canvases, tools }) {
     Object.assign(this, { camera, rig, canvas, world, audio, wall, canvases, tools });
@@ -29,23 +31,27 @@ export class DesktopControls {
     this.raycaster = new THREE.Raycaster();
     this.input = { pressure: 0, origin: new THREE.Vector3(), dir: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3() };
     this.reset();
+    this.touch = new TouchControls(this);
+    const finger = e => e.pointerType === 'touch';
 
     canvas.addEventListener('contextmenu', e => e.preventDefault());
-    canvas.addEventListener('pointermove', e => this._pointer(e));
+    canvas.addEventListener('pointermove', e => { if (finger(e)) this.touch.move(e); else this._pointer(e); });
     canvas.addEventListener('pointerdown', e => {
       this.audio.ensure();
+      if (finger(e)) { canvas.setPointerCapture(e.pointerId); this.touch.down(e); return; }
       this._pointer(e);
       canvas.setPointerCapture(e.pointerId);
       if (e.button === 0) { this.down = true; this.pressEdge = true; }
       else if (e.button === 2 || e.button === 1) this.look = { x: e.clientX, y: e.clientY };
     });
     const up = e => {
+      if (finger(e)) { this.touch.up(e); return; }
       if (e.button === 0) this.down = false;
       if (e.button === 2 || e.button === 1) this.look = null;
     };
     canvas.addEventListener('pointerup', up);
-    canvas.addEventListener('pointercancel', () => { this.down = false; this.look = null; });
-    canvas.addEventListener('pointerleave', e => { if (!this.down && !this.look) this.hasPointer = false; this.shift = e.shiftKey; });
+    canvas.addEventListener('pointercancel', e => { if (finger(e)) { this.touch.up(e); return; } this.down = false; this.look = null; });
+    canvas.addEventListener('pointerleave', e => { if (finger(e)) return; if (!this.down && !this.look) this.hasPointer = false; this.shift = e.shiftKey; });
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
       const d = e.deltaY || e.deltaX;
@@ -87,7 +93,7 @@ export class DesktopControls {
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     });
     addEventListener('keyup', e => { this.keys.delete(e.code); this.shift = e.shiftKey; });
-    addEventListener('blur', () => { this.keys.clear(); this.down = false; this.look = null; });
+    addEventListener('blur', () => { this.keys.clear(); this.down = false; this.look = null; this.touch.reset(); });
   }
 
   reset() {
@@ -98,6 +104,13 @@ export class DesktopControls {
     this.rig.rotation.set(0, 0, 0);
     this.camera.position.set(0, 1.55, 0);
     this.camera.rotation.set(this.pitch, 0, 0);
+  }
+
+  // Surface peignable sous un point de l'écran (coordonnées normalisées)
+  hitAt(ndc) {
+    this.rig.updateMatrixWorld(true);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    return this.pick(this.raycaster.ray);
   }
 
   // Surface peignable la plus proche sous le pointeur (mur ou devanture)
@@ -130,10 +143,12 @@ export class DesktopControls {
   }
 
   update(dt) {
-    const k = this.keys, rig = this.rig;
-    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-    const lift = (k.has('KeyE') || k.has('Space') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0);
+    const k = this.keys, rig = this.rig, pad = this.touch.pad, clamp = THREE.MathUtils.clamp;
+    this.touch.update();
+    // clavier et croix tactile s'additionnent
+    const fwd = clamp((k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) + pad.fwd, -1, 1);
+    const side = clamp((k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + pad.side, -1, 1);
+    const lift = clamp((k.has('KeyE') || k.has('Space') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0) + pad.lift, -1, 1);
     rig.rotation.y = this.yaw;
     this.camera.rotation.set(this.pitch, 0, 0);
     if (fwd || side) {
@@ -148,11 +163,7 @@ export class DesktopControls {
     const press = this.pressEdge;
     this.pressEdge = false;
     let hit = null;
-    if (this.hasPointer) {
-      rig.updateMatrixWorld(true);
-      this.raycaster.setFromCamera(this.ndc, this.camera);
-      hit = this.pick(this.raycaster.ray);
-    }
+    if (this.hasPointer) hit = this.hitAt(this.ndc);
     if (state.tool === 'cache') { this._maskTool(hit, press); return null; }
     this._maskTool(null, false);
     if (!hit) return null;

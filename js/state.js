@@ -59,6 +59,9 @@ export const state = {
   maskShape: 'rond',
   maskSize: 0.15,      // demi-taille du prochain cache (m)
   maskLift: 0.002,     // décollement du prochain cache (m)
+  touchDrag: 'regarder',   // écran tactile, deux doigts qui glissent : regarder | glisser (le long du mur)
+  touchPinch: 'largeur',   // pincer : largeur (de l'outil) | avancer (vers le mur)
+  touchPad: true,          // croix de déplacement à l'écran
 };
 
 const PREFS_KEY = 'vrpaint.prefs';

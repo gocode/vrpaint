@@ -18,6 +18,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg);
   color: var(--text);
   font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -45,6 +46,8 @@ html, body {
   border-right: 1px solid var(--line);
   backdrop-filter: blur(8px);
   z-index: 2;
+  touch-action: pan-y;   /* le panneau défile, mais pincer ne zoome pas la page */
+  overscroll-behavior: contain;
 }
 
 #panel header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
@@ -185,6 +188,7 @@ p.help { padding-left: 0; }
   position: fixed; top: 12px; left: 12px; z-index: 4;
   width: 40px; height: 40px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 18px;
+  touch-action: manipulation;
 }
 
 @media (max-width: 760px) {
@@ -222,6 +226,52 @@ body.xr-live #hud, body.xr-live #toast { left: 50%; }
 @media (max-width: 760px) {
   #specbar { left: 60px; flex-wrap: wrap; }
 }
+
+/* Écran tactile : croix de déplacement, nacelle, bulle du pincement */
+.touch-only { display: none; }
+body.touch .touch-only { display: block; }
+#touch-pad {
+  display: none;
+  position: fixed; z-index: 1;
+  left: calc(316px + env(safe-area-inset-left));
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  align-items: flex-end; gap: 10px;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+body.touch:not(.pad-off) #touch-pad { display: flex; }
+@media (max-width: 760px) {
+  #touch-pad { left: calc(16px + env(safe-area-inset-left)); }
+}
+#touch-pad .cross {
+  position: relative; width: 132px; height: 132px; border-radius: 50%;
+  background: rgba(10, 10, 12, 0.45); border: 1px solid #fff2;
+}
+#touch-pad .cross span {
+  position: absolute; width: 44px; height: 44px; display: grid; place-items: center;
+  color: #fffa; font-size: 18px; pointer-events: none;
+}
+#touch-pad .cross span.on { color: var(--accent); }
+#touch-pad [data-dir=fwd] { left: 44px; top: 0; }
+#touch-pad [data-dir=back] { left: 44px; bottom: 0; }
+#touch-pad [data-dir=left] { left: 0; top: 44px; }
+#touch-pad [data-dir=right] { right: 0; top: 44px; }
+#touch-pad .cross i {
+  position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px;
+  border-radius: 50%; background: #fff3; border: 1px solid #fff5; pointer-events: none;
+}
+#touch-pad .lift { display: grid; gap: 8px; }
+#touch-pad .lift button {
+  width: 44px; height: 44px; border-radius: 10px; border: 1px solid #fff2;
+  background: rgba(10, 10, 12, 0.45); color: #fffa; font-size: 20px; touch-action: none;
+}
+#touch-pad .lift button.on { color: var(--accent); border-color: var(--accent); }
+#touch-bubble {
+  position: fixed; z-index: 3; transform: translate(-50%, -50%);
+  padding: 6px 12px; border-radius: 999px; background: rgba(10, 10, 12, 0.8);
+  font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap;
+  pointer-events: none; opacity: 0; transition: opacity .4s;
+}
+#touch-bubble.show { opacity: 1; transition: none; }
 
 /* Modèle photo */
 .file-btn {
