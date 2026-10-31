@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { state, set, subscribe, actions, setTool } from './state.js';
 import { scraperById } from './scraper.js';
+import { brushById, brushSize, brushReach } from './brush.js';
+import { NEWSPAPER } from './newspaper.js';
 
 const Y = new THREE.Vector3(0, 1, 0);
 const _q = new THREE.Quaternion();
@@ -17,6 +19,7 @@ const _f = new THREE.Vector3();
 //     visant = taille ; A = retirer le cache visé
 //   racloirs : la lame racle quand elle touche le mur ; l'enfoncer (ou la
 //     gâchette) appuie plus fort ; vibrations selon la pression et la vitesse
+//   pinceaux, papier journal : de même au contact (poils pliés, boule écrasée)
 //   main de la palette : joystick = se déplacer, X = masquer la palette, Y = jour/nuit
 export class XRControls {
   constructor({ renderer, rig, camera, palette, world, audio, wall, tools }) {
@@ -58,6 +61,11 @@ export class XRControls {
         m.position.set(0, 0, 0);
         m.quaternion.identity();
       }
+      for (const m of this._contactMeshes()) {
+        this.canHand.ray.add(m);
+        m.position.set(0, 0, 0);
+        m.quaternion.identity();
+      }
     }
     if (this.palHand) this.palHand.grip.add(this.palette.mesh);
     else this.palette.mesh.removeFromParent();
@@ -73,6 +81,7 @@ export class XRControls {
     this.laser.removeFromParent();
     this.world.scene.add(this.world.can);
     for (const m of this.tools.scraper.meshes.values()) this.world.scene.add(m);
+    for (const m of this._contactMeshes()) this.world.scene.add(m);
     this._dropMask();
   }
 
@@ -198,6 +207,7 @@ export class XRControls {
     if (this.mode === 'ui') return null;
     const tool = scraperById(state.tool);
     if (tool) return this._scraperMode(gp, inp, tool, this.mode === 'spray' ? trig : 0);
+    if (brushById(state.tool) || state.tool === NEWSPAPER.id) return this._contactMode(gp, inp, this.mode === 'spray' ? trig : 0);
     inp.reach = 0;
     inp.pressure = this.mode === 'spray' ? trig : 0;
     if (inp.pressure > 0.05) this.pulse(gp, 0.05 + 0.15 * inp.pressure, 30);
@@ -250,6 +260,32 @@ export class XRControls {
     }
     S.showGhost(!over && hit ? hit.canvas : null,
       hit && { shape: state.maskShape, x: hit.x, y: hit.y, r: state.maskSize, rot: roll, lift: state.maskLift });
+  }
+
+  _contactMeshes() {
+    return [...this.tools.brush.meshes.values(), this.tools.newspaper.mesh];
+  }
+
+  // Pinceaux et papier journal : comme les racloirs, au contact du mur. Les
+  // poils (la boule de papier) reculent dans la main au lieu de traverser.
+  _contactMode(gp, inp, trig) {
+    const br = brushById(state.tool);
+    const sim = br ? this.tools.brush : this.tools.newspaper;
+    const reach = br ? brushReach(br, brushSize(br, state.brushSizes)) : NEWSPAPER.reach;
+    inp.reach = reach;
+    inp.trigger = trig;
+    inp.pressure = 0;
+    const h = this.tools.spray.project(inp.origin, inp.dir, inp.right, inp.up);
+    const mesh = br ? sim.meshes.get(br.id) : sim.mesh;
+    mesh.position.set(0, 0, h ? THREE.MathUtils.clamp(reach - h.t, 0, 0.1) : 0);
+    // vibrations : le pinceau frôle (doux, continu) ; le papier crisse à l'appui
+    if (sim.contact) {
+      const v = Math.min(1, sim.speed / 0.3);
+      if (performance.now() - (sim.touched || 0) < 40) this.pulse(gp, br ? 0.25 : 0.5, 18);
+      else if (br) this.pulse(gp, (0.04 + 0.2 * sim.pressure) * (0.4 + 0.6 * v), 25);
+      else this.pulse(gp, (0.05 + 0.35 * sim.pressure) * (0.2 + 0.8 * v) * (0.6 + 0.8 * Math.random()), 25);
+    }
+    return inp;
   }
 
   // Racloirs : la pression vient de l'enfoncement de la lame dans le mur

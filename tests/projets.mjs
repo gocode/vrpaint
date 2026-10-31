@@ -14,6 +14,8 @@
 //
 //   node tests/projets.mjs            (environ 4 min ; PLAYWRIGHT_CORE = chemin de playwright-core si besoin)
 //   node tests/projets.mjs --rapide   (mur peint de rayures au lieu de la peinture scriptée)
+//   VRPAINT_PC / VRPAINT_CASQUE : autres adresses de A et B (un worktree, par exemple
+//   http://localhost/VRpaint/.claude/worktrees/x/ et https://localhost/.claude/worktrees/x/)
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -25,8 +27,9 @@ const { chromium } = require(pwPath);
 const RES = 1024;   // résolution réduite, la même des deux côtés (sinon l'ouverture rééchantillonne)
 const quick = process.argv.includes('--rapide');
 const C = 'essai-' + Date.now().toString(36);
-const A_URL = `http://localhost/VRpaint/?projets=${C}&res=${RES}${quick ? '' : '&test'}`;
-const B_URL = `https://localhost/?projets=${C}&res=${RES}`;
+const PC = process.env.VRPAINT_PC || 'http://localhost/VRpaint/', CASQUE = process.env.VRPAINT_CASQUE || 'https://localhost/';
+const A_URL = `${PC}?projets=${C}&res=${RES}${quick ? '' : '&test'}`;
+const B_URL = `${CASQUE}?projets=${C}&res=${RES}`;
 
 const browser = await chromium.launch({ headless: true, args: ['--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 // fenêtre réduite : le rendu logiciel de chaque image est plus court
@@ -218,7 +221,7 @@ try {
   const ctxD = await browser.newContext({ viewport: { width: 820, height: 420 } });
   const D = await ctxD.newPage();
   D.on('pageerror', e => console.log(`[D] erreur page : ${e.message}`));
-  await D.goto(`http://localhost/VRpaint/?local&res=${RES}`, { waitUntil: 'domcontentloaded', timeout: 5 * MIN });
+  await D.goto(`${PC}?local&res=${RES}`, { waitUntil: 'domcontentloaded', timeout: 5 * MIN });
   await ready(D);
   await D.setInputFiles('#project-file', file);
   await waitFor(D, id => window.__vrpaint.state.projectId === id, id, 'ouverture du fichier sur D');

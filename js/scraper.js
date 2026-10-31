@@ -32,6 +32,17 @@ function attackFactor(a) {
   return 1 - 0.3 * Math.min(1, (a - 0.9) / 0.67);
 }
 
+// Pression d'un outil tenu contre la toile. En VR (input.reach), elle vient de
+// la profondeur à laquelle le bout de l'outil passerait derrière la toile, ou de
+// la gâchette au contact ; à la souris, du réglage de pression.
+export function touchPressure(hit, input, fullDepth) {
+  const cosI = Math.max(0, -input.dir.dot(hit.canvas.frame.n));
+  if (!input.reach) return { p: input.pressure, depth: 0, cosI };
+  const depth = (input.reach - hit.t) * cosI;
+  const p = depth > -0.003 ? Math.max(Math.min(1, (depth + 0.003) / fullDepth), input.trigger || 0) : 0;
+  return { p, depth, cosI };
+}
+
 const _e = new THREE.Vector3();
 
 export class Scraper {
@@ -54,15 +65,10 @@ export class Scraper {
     this.hit = hit;
     let p = 0, depth = 0;
     if (hit) {
-      const n = hit.canvas.frame.n, cosI = Math.max(0, -input.dir.dot(n));
-      if (input.reach) {
-        // pression : profondeur à laquelle le fil de la lame passerait derrière le mur
-        depth = (input.reach - hit.t) * cosI;
-        if (depth > -0.003) p = Math.max(Math.min(1, (depth + 0.003) / PRESS_DEPTH), input.trigger || 0);
-        p *= attackFactor(Math.asin(Math.min(1, cosI)));
-      } else {
-        p = input.pressure * attackFactor(input.attack ?? 0.5);
-      }
+      // pression : profondeur à laquelle le fil de la lame passerait derrière le mur
+      const t = touchPressure(hit, input, PRESS_DEPTH);
+      depth = t.depth;
+      p = t.p * attackFactor(input.reach ? Math.asin(Math.min(1, t.cosI)) : input.attack ?? 0.5);
     }
     this.depth = depth;
     const contact = p > 0.02;

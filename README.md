@@ -1,6 +1,6 @@
 # VRpaint — graffiti en réalité virtuelle
 
-Un mur (8 m × 3 m par défaut, réglable) et les devantures de la rue à peindre à la bombe, dans le casque Meta Quest (WebXR) ou à la souris sur PC, ou au doigt sur téléphone et tablette.
+Un mur (8 m × 3 m par défaut, réglable) et les devantures de la rue à peindre à la bombe ou au pinceau, dans le casque Meta Quest (WebXR) ou à la souris sur PC, ou au doigt sur téléphone et tablette.
 Aucune installation ni compilation : du HTML/JavaScript servi par WAMP, Three.js chargé depuis le CDN jsDelivr.
 
 ## Lancer
@@ -9,6 +9,10 @@ Aucune installation ni compilation : du HTML/JavaScript servi par WAMP, Three.js
 - **Test automatique** (peinture scriptée, sans casque) : http://localhost/VRpaint/?test (ou `?test=night`)
 - **Test des caches et du raclage** : http://localhost/VRpaint/?test=caches (fond bleu, caches superposés, aplat rouge,
   retrait des caches, raclage au couteau, à la spatule et au grattoir, puis contrôles d'annulation exacte)
+- **Test du papier journal et des pinceaux** : http://localhost/VRpaint/?test=outils (fond bleu sec, rouge par-dessus,
+  appuis et frottement au papier journal, traits de pinceau rond et plat, puis annulation exacte et enregistrement ;
+  lignes `VRPAINT_OUTILS_…` dans la console). Contrôle complet, en headless : `node tests/outils.mjs`
+  (voir [Pinceaux et papier journal](#pinceaux-et-papier-journal)).
 - Paramètre `?res=2048|3072|4096` pour forcer la résolution du mur (par défaut 4096 sur PC, 3072 sur Quest).
 
 ## Jouer sur le Meta Quest 2
@@ -114,6 +118,17 @@ depuis GitHub Pages ; la diffusion native fait le même travail sans coût pour 
 | Taille | joystick droit ↑ ↓ en visant (ou en tenant) un cache |
 | Retirer | A en visant un cache · « Retirer tous les caches » dans l'onglet Outils |
 
+**Pinceaux** (rond, plat) : les poils dépassent de la manette et peignent dès qu'ils touchent le mur, avec la couleur en
+cours. Plus on les plie « dans » le mur (jusqu'à 3 cm), plus le pinceau s'écrase et charge le trait ; la gâchette ajoute
+de la pression au contact. La tranche du pinceau plat suit le poignet : à plat en travers du geste, il couvre une bande ;
+de chant, il trace un filet. La charge s'épuise le long du trait ; décoller le pinceau du mur une demi-seconde le
+recharge. Taille : onglet **Outils** (rond : 1, 2,5 ou 5 cm ; plat : 2, 4 ou 8 cm).
+
+**Papier journal** : une boule de papier froissé au bout de la manette. La presser contre le mur (tamponner) ou la
+frotter emporte une fine couche de la peinture fraîche ou récente ; l'écraser davantage (jusqu'à 3,5 cm) élargit le
+contact. À chaque nouvel appui, le papier a tourné et s'est re-froissé : le motif change. Vibrations : un petit choc
+à l'appui, puis un grain en frottant.
+
 **Racloirs** (couteau, spatule, grattoir) : la lame dépasse de la manette. Elle racle dès qu'elle touche le mur ; plus on
 l'enfonce « dans » le mur (jusqu'à 3 cm), plus on appuie. La gâchette ajoute de la pression au contact. Le fil de la lame
 suit le poignet : tirer la lame en travers racle, la faire glisser dans son axe ne fait rien. Tenue presque à plat, elle
@@ -123,7 +138,8 @@ vitesse. L'outil recule dans la main au lieu de traverser le mur.
 Palette à 6 onglets :
 - **Couleurs** : le nuancier ;
 - **Perso** : teinte, finition, Enregistrer, Mes couleurs ;
-- **Outils** : bombe, caches (forme, taille, décollement, tout retirer), couteau, spatule, grattoir ;
+- **Outils** : en haut ce qui pose la peinture (bombe, pinceau rond, pinceau plat, caches : forme, taille,
+  décollement, tout retirer), en bas ce qui l'enlève (couteau, spatule, grattoir, papier journal) ; tailles des pinceaux ;
 - **Modèle** : choisir la photo de référence, l'afficher à gauche, à droite ou au-dessus de la palette, ou sur un chevalet près du mur, et régler sa taille. Les photos s'ajoutent depuis le panneau du navigateur, avant d'entrer en VR ;
 - **Réglages** : annuler, effacer, nuit, coulures, viseur, main droite/gauche, type et taille du mur ;
 - **Projets** : nouveau, enregistrer, ouvrir (les projets du PC, communs au PC et au casque).
@@ -138,7 +154,11 @@ clic droit + glisser : regarder · ZQSD ou flèches : se déplacer · A/E : desc
 Ctrl+Z : annuler · N : nuit · V : viseur · C : coulures · X : secouer.
 Clic sur la pastille de la couleur en cours : éditeur de couleur perso. Clic droit sur une couleur de « Mes couleurs » : la retirer.
 
-Outils : B = bombe · M = caches · R = racloir suivant (couteau, spatule, grattoir), ou la section **Outil** du panneau.
+Outils : B = bombe · P = pinceau rond ⇄ plat · M = caches · R = racloir suivant (couteau, spatule, grattoir) ·
+J = papier journal, ou la section **Outil** du panneau.
+- Pinceaux : glisser sur le mur · molette = pression (le rond s'écrase et s'élargit) · Maj + molette = angle du pinceau
+  plat (curseur « Angle ») · taille dans le panneau. Relâcher un instant recharge le pinceau.
+- Papier journal : clic = tamponner, glisser = frotter · molette = pression. Chaque clic est un nouveau froissage.
 - Caches : clic sur le mur = poser (glisser avant de lâcher pour le placer) · clic sur un cache = le déplacer ·
   molette sur un cache = taille · Maj + molette = rotation · Suppr = le retirer. Sans cache sous le pointeur, la molette
   règle la taille du prochain cache et Maj + molette son angle.
@@ -149,9 +169,9 @@ Chaque geste a un seul rôle, pour qu'aucun ne déclenche l'autre :
 
 | Geste | Effet |
 |---|---|
-| **Un doigt** | peindre (avec les caches : poser ou déplacer un cache ; avec un racloir : racler). Une tape brève fait un point. |
+| **Un doigt** | peindre (avec les caches : poser ou déplacer un cache ; avec un racloir : racler ; avec le papier journal : tamponner, ou frotter en glissant). Une tape brève fait un point. |
 | **Deux doigts qui glissent** | regarder autour : on « attrape » le décor, qui suit les doigts (glisser vers le bas lève la tête). |
-| **Pincer / écarter** | largeur du jet de la bombe (30 à 250 %), avec une bulle « Jet 120 % · ≈ 18 cm » et l'anneau du viseur qui suit. Avec les caches : taille du cache touché, et en tournant les doigts son angle (sans cache sous les doigts : taille du prochain). Avec un racloir : pression. |
+| **Pincer / écarter** | largeur du jet de la bombe (30 à 250 %), avec une bulle « Jet 120 % · ≈ 18 cm » et l'anneau du viseur qui suit. Avec les caches : taille du cache touché, et en tournant les doigts son angle (sans cache sous les doigts : taille du prochain). Avec un racloir, un pinceau ou le papier journal : pression. |
 | **Croix en bas à gauche** | avancer, reculer, se décaler, y compris en diagonale. Elle est progressive : plus le pouce s'éloigne du centre, plus on va vite. |
 | **⤒ ⤓** | monter, descendre la nacelle. |
 
@@ -233,16 +253,55 @@ node tests/tactile.mjs
   Le fond coûte environ 56 Mo de plus pour un mur de 8 m sur Quest 2. Le raclage travaille sur l'écart
   (visible − fond), qu'il efface de façon multiplicative : le résultat ne dépend ni de l'ordre ni du recouvrement des
   passages. Chaque passage de lame balaie un quadrilatère sans recouvrement : racler vite ou lentement retire autant.
+- **Pinceaux** : un pinceau rond (1, 2,5 et 5 cm) et un pinceau plat (2, 4 et 8 cm), chargés de la couleur en cours
+  (mate, métallisée, fluo, phospho…).
+  - **Trace de poils** : la touffe est faite de 10 à 50 mèches, toujours les mêmes pour un pinceau donné. Chacune a sa
+    place dans la touffe, son épaisseur (au moins 1,7 texel du mur, sinon elle se tramerait) et son opacité. Chaque mèche suit sa propre trajectoire et y pose de petits
+    tampons nets, tous les ½ rayon : le trait est strié dans le sens du geste.
+  - **Charge** : chaque mèche a sa réserve, qui baisse avec la peinture posée (plus vite en appuyant). Chargé, le
+    pinceau couvre presque entièrement. En se vidant, une mèche pâlit, puis ne touche plus que par endroits (bruit le
+    long de son chemin) : le trait se casse en traînées sèches, mèche après mèche, sur 1 m environ. Décoller le
+    pinceau du mur une demi-seconde le recharge (on le retrempe) ; changer de couleur aussi. La couleur des poils du
+    pinceau tenu en main pâlit avec la charge.
+  - **Pression** : le pinceau rond s'écrase (de 30 % de son diamètre, la pointe, jusqu'au ventre entier). Le pinceau
+    plat garde sa largeur, mais sa tranche épaissit.
+  - **Tranche** : le pinceau plat est orienté par le poignet (par le curseur « Angle » à la souris). En travers du
+    geste, il couvre une bande de toute sa largeur ; de chant, il trace un filet de quelques millimètres.
+  - La peinture passe par les mêmes tampons que la bombe : les caches l'arrêtent, la couche « fond » garde ce qu'elle
+    recouvre (le raclage et le papier journal le retrouvent), l'annulation est exacte.
+- **Papier journal froissé** : une boule de 11 cm. Pressée sur le mur, elle n'en touche que les crêtes.
+  - **Motif** : le papier est modélisé comme un relief plan par morceaux. Chaque pli est une cellule de Voronoi
+    (environ 2,5 cm) dont la hauteur est la distance aux arêtes de la cellule. Les cellules sont donc de petites
+    pyramides : des facettes planes séparées par des arêtes vives, comme un relief de montagnes vu du ciel. Deux
+    échelles de plis se superposent (2,5 cm et 1,1 cm) ; plus fins, les plis tomberaient sous la taille d'un texel du
+    mur. La boule est bombée : le contact part du centre. La pression abaisse le niveau de contact. Le bord du contact
+    est net, sur un texel, et chaque facette emporte plus ou moins selon sa pente : ce n'est pas un bruit flou.
+  - **Chaque appui est différent** : à chaque nouvel appui, une nouvelle graine (un autre froissage) et une rotation au
+    hasard ; en VR, le motif tourne aussi avec le poignet.
+  - **Tamponner, appuyer, frotter** : appuyer plus fort sur place agrandit le contact, sans repasser sur ce qui est
+    déjà parti. Le shader n'emporte que la différence entre les deux pressions : 1 − (1 − e₁)/(1 − e₀). En frottant, le
+    motif est reposé tous les 5 mm (ou tous les 4° de rotation), moins fort qu'un appui franc. La boule roule à 80 % et
+    glisse à 20 % : d'autres plis viennent toucher, et la bande frottée est une mosaïque de facettes, pas des rayures.
+  - **Fraîche ou récente** : le papier travaille comme le raclage, sur l'écart entre la couche visible et le « fond ».
+    Il ramène la dernière couche vers ce qu'elle recouvrait, sans jamais toucher au fond : il montre les couches sèches
+    du dessous, jamais le mur. La peinture fraîche (posée il y a quelques secondes) part bien mieux que la peinture
+    récente, déjà prise. La fraîcheur vient d'une carte à mailles de 3 cm, tenue par la bombe et les pinceaux ; elle
+    n'est pas enregistrée, et un projet rouvert est sec.
+  - Un cache protège aussi du papier. Chaque appui (et chaque frottement) s'annule d'un coup ; les passes sont des
+    rendus, comme le raclage.
 - **Murs** :
   - 11 types : briques, briques peintes, parpaings, pierre, béton banché, crépi, tôle ondulée, palissade bois, carrelage métro, mur blanc, mur noir ;
   - taille réglable de 3 à 16 m de large et de 2 à 6 m de haut ; la peinture déjà faite reste à sa place, et Annuler rend le mur d'avant intact.
 - **Autres surfaces** : les devantures et rideaux de toutes les boutiques de la rue se peignent aussi. La bombe vise la surface la plus proche. Une devanture n'occupe de mémoire qu'au premier coup de bombe.
 - **Annulation** : chaque geste s'annule :
   - un trait et ses coulures ;
-  - un raclage ;
+  - un raclage, un appui ou un frottement au papier journal, un trait de pinceau ;
   - la pose, le déplacement, le redimensionnement ou le retrait d'un cache ;
   - un effacement ;
   - un changement de taille.
+
+  Deux gestes rapprochés restent deux annulations : avant d'ouvrir un geste, ce qui attend encore d'être écrit est
+  écrit et rangé dans le geste d'avant (le test, qui rejoue 40 pas par image, l'avait révélé avec le papier journal).
 
   L'historique ne garde que les carreaux de 256 × 256 points réellement touchés, couche « fond » comprise : on remonte
   des dizaines, voire des centaines d'étapes. Le budget est de 200 Mo sur Quest 2 autonome et de 900 Mo sur PC ;
@@ -324,6 +383,7 @@ Détails techniques :
   anciens projets du navigateur, renommage et suppression, puis fichier `.vrpaint` téléchargé et rouvert identique dans
   un navigateur neuf sans le PC (sans doublon la seconde fois, fichier tronqué refusé). Affiche `PROJETS_OK` ou `PROJETS_ECHEC` (environ 4 min ;
   `--rapide` remplace la peinture scriptée par des rayures). Utilise `playwright-core` (variable `PLAYWRIGHT_CORE`).
+  Pour vérifier une autre copie du jeu (un worktree), `VRPAINT_PC` et `VRPAINT_CASQUE` remplacent les deux adresses.
 
 À essayer dans le casque (non vérifiable en headless) :
 - au premier lancement dans le navigateur du Quest (https://&lt;IP du PC&gt;/), les anciens projets du casque rejoignent la liste ;
@@ -342,6 +402,8 @@ Détails techniques :
 | `js/history.js` | Historique d'annulation par carreaux, commun à toutes les surfaces (couches visibles et « fond ») |
 | `js/stencils.js` | Caches : formes (fonctions de distance GLSL et JS), films 3D, pose / déplacement / retrait annulables |
 | `js/scraper.js` | Racloirs : géométrie de la lame, pression, angle d'attaque, modèles 3D |
+| `js/brush.js` | Pinceaux rond et plat : touffe de mèches, charge de chaque mèche, tranche, modèles 3D |
+| `js/newspaper.js` | Papier journal : motif de papier froissé (GLSL), appuis et frottements, fraîcheur de la peinture, boule de papier 3D |
 | `js/canvases.js` | Devantures peignables (surfaces créées à la demande, calques de peinture) |
 | `js/street.js` | Rue, immeubles, fenêtres et vitrines en profondeur (interior mapping), mobilier, réverbères |
 | `js/cars.js` | Voitures procédurales (profils extrudés et galbés) et circulation |
@@ -358,7 +420,7 @@ Détails techniques :
 | `js/storage.js` | Projets : sur le PC (projets.php) ou dans le navigateur (IndexedDB), couches compressées gzip, reprise des anciens projets |
 | `js/audio.js` | Souffle de la bombe et cliquetis de la bille (Web Audio, sans fichier son) |
 | `js/frames.js` | Rendu à la demande sur PC : pas d'image recalculée quand l'écran n'a pas à changer |
-| `js/test.js` | Peinture scriptée de contrôle (`?test`, `?test=caches`) |
+| `js/test.js`, `js/test-outils.js` | Peinture scriptée de contrôle (`?test`, `?test=caches`, `?test=outils`) |
 
 Toute écriture dans les couches de peinture passe par un rendu, jamais par un simple `clear()`. Sinon les niveaux de
 mipmap, utilisés quand on regarde le mur de loin en VR, garderaient l'ancienne peinture. Le test `?test` vérifie ce point :
@@ -369,6 +431,39 @@ ne sont régénérées qu'au dernier. `?test=caches` vérifie l'annulation sur l
 couches, fond compris :
 - `VRPAINT_UNDO_CHECK` : annuler les raclages rend les couches d'avant au bit près ;
 - `VRPAINT_UNDO_ALL_CHECK` : tout annuler rend le mur vierge, sans aucun cache.
+
+Le papier journal utilise les mêmes passes : il multiplie l'écart (visible − fond) sans toucher au fond.
+
+### Pinceaux et papier journal
+
+`?test=outils` rejoue des gestes image par image et mesure le résultat sur des images du mur (2 mm par pixel, 1 mm
+pour les traits de pinceau) :
+
+| Contrôle | Ce qui est vérifié |
+|---|---|
+| `PAPIER_REVELE` | sur un rouge posé sur un bleu sec, le papier ne fait apparaître que du bleu : aucun pixel hors du mélange rouge-bleu (le mur ne se montre jamais) |
+| `PAPIER_NET` | bord de contact net : peu de pixels de transition entre « touché » et « pas touché » |
+| `PAPIER_CHAQUE_APPUI` | deux appuis identiques ne donnent pas le même motif (corrélation faible) |
+| `PAPIER_PRESSION` | un appui fort touche bien plus de surface qu'un appui léger |
+| `PAPIER_FRAIS` | la peinture fraîche part mieux que la peinture récente |
+| `PAPIER_FOND_INTACT` | huit appuis forts au même endroit montrent le bleu presque entier, et toujours pas le mur |
+| `PAPIER_FROTTE` | frotter laisse une bande continue |
+| `PINCEAU_CHARGE` | le long d'un trait de 2,3 m, la couverture baisse : le pinceau se vide |
+| `PINCEAU_POILS` | en travers du trait, le profil est strié ; au milieu, le trait se casse en traînées |
+| `PINCEAU_COULEUR` | le trait a la couleur en cours |
+| `PINCEAU_PLAT_TRANCHE` | le pinceau plat en travers du geste couvre une bande ; de chant, un filet |
+| `PINCEAU_TAILLES` | le pinceau rond de 5 cm trace bien plus large que celui de 1 cm |
+| `UNDO` | annuler tous ces gestes rend les couches brutes (half-float) d'avant, au bit près |
+| `ENREGISTRE` | après un trait de pinceau, un appui et un frottement, enregistrer puis rouvrir rend les mêmes couches et la même image |
+
+`node tests/outils.mjs` (≈ 3 min, Chrome headless avec GPU D3D11, aucune fenêtre) lance `?test=outils`, puis vérifie
+le panneau du navigateur (boutons d'outil et de taille, HUD), les touches P et J, de vrais gestes de souris (trait de
+pinceau, tampon et frottement du papier sur de la peinture, Ctrl+Z), l'onglet Outils de la palette VR (8 outils, rien
+ne se chevauche ni ne descend sur les caps, appuis sur un outil et sur une taille), le doigt sur téléphone (trait,
+pincer = pression) et enfin `?test=caches`. Images dans `tmp/outils/`.
+
+Non vérifiable en headless, à essayer dans le casque : le contact des poils et de la boule de papier avec le mur,
+l'orientation de la tranche au poignet, les vibrations, la lisibilité de l'onglet Outils.
 
 L'enregistrement des couches est exact : exporter puis réimporter une couche redonne les mêmes octets, sur le mur comme
 sur les devantures, même pour les texels presque transparents (l'export et l'import à taille égale lisent texel à texel, sans filtrage ;
@@ -404,4 +499,6 @@ Rien n'est sacrifié à l'image : les optimisations ne changent pas un pixel (v�
 
 - Phosphorescence réaliste : charge à la lumière, déclin progressif dans le noir, lampe UV.
 - Peinture qui s'accumule sur les caches (et qu'on reporte en les déplaçant) ; raclage qui étale la peinture encore fraîche.
+- Pinceau qui mêle la peinture fraîche du mur à sa charge (mouillé sur mouillé) ; papier journal qui se charge de ce
+  qu'il emporte et le redépose plus loin ; pot de peinture où tremper le pinceau.
 - Pipette (prélever une couleur sur le mur), niveau de la bombe qui se vide.

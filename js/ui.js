@@ -7,6 +7,8 @@ import {
 import { drawCapIcon, drawToolIcon, editorHex } from './vrui.js';
 import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon } from './stencils.js';
 import { scraperById } from './scraper.js';
+import { BRUSHES, brushById, brushSize } from './brush.js';
+import { NEWSPAPER } from './newspaper.js';
 import { importImage, addRefs, removeRef, currentRef, REF_SIDES } from './refs.js';
 import { SPECTATOR_MODES } from './spectator.js';
 import { projectsWhere } from './storage.js';
@@ -63,6 +65,16 @@ export function buildUI() {
         <p class="help">Clic sur le mur : poser un cache (glisser pour le placer) · clic sur un cache : le déplacer ·
           molette dessus : taille · Maj + molette : rotation · Suppr : le retirer. Plaqué, le bord est net ; décollé, il s'estompe.</p>
       </div>
+      ${BRUSHES.map(b => `<div class="brush-opts" data-brush-opts="${b.id}">
+        <h2>Taille du pinceau ${b.kind === 'rond' ? '(diamètre)' : '(largeur)'}</h2>
+        <div class="finishes">${b.sizes.map(v => `<button type="button" data-brush="${b.id}" data-size="${v}">${num(Math.round(v * 1000) / 10)} cm</button>`).join('')}</div>
+      </div>`).join('')}
+      <p class="help" id="brush-help">Glisser sur le mur pour peindre avec la couleur en cours : le trait garde la trace des poils
+        et pâlit quand la charge s'épuise ; lâcher un instant recharge le pinceau. Molette : pression (le pinceau rond s'écrase
+        et s'élargit) · Maj + molette : angle du pinceau plat (de chant, il trace un filet).</p>
+      <p class="help" id="paper-help">Cliquer pour tamponner, glisser pour frotter : le papier froissé emporte une fine couche
+        de peinture fraîche ou récente et laisse voir les couches sèches du dessous. Chaque appui donne un nouveau froissage.
+        Molette : pression (contact plus large).</p>
       <p class="help" id="scraper-help">Glisser sur le mur pour racler : la lame retire la dernière couche et laisse voir
         celle du dessous ; à forte pression, elle va jusqu'au mur. Molette : pression · Maj + molette : angle de la lame.</p>
     </section>
@@ -78,7 +90,7 @@ export function buildUI() {
         <input type="range" id="pressure" min="10" max="100" step="5"></label>
       <label class="slider">Distance au mur <output id="o-distance"></output>
         <input type="range" id="distance" min="2" max="80" step="1"></label>
-      <label class="slider" id="angle-row">Angle (flat cap, lame, cache) <output id="o-angle"></output>
+      <label class="slider" id="angle-row">Angle (flat cap, pinceau plat, lame, cache) <output id="o-angle"></output>
         <input type="range" id="angle" min="-90" max="90" step="5"></label>
     </section>
     <section class="touch-only">
@@ -147,7 +159,7 @@ export function buildUI() {
         <li><b>Clic droit + glisser</b> : regarder autour</li>
         <li><b>ZQSD</b> ou flèches : se déplacer · <b>A / E</b> : descendre / monter</li>
         <li><b>1 à 5</b> : caps · <b>Ctrl + Z</b> : annuler</li>
-        <li><b>B</b> : bombe · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir)</li>
+        <li><b>B</b> : bombe · <b>P</b> : pinceau rond / plat · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir) · <b>J</b> : papier journal</li>
         <li>Caches : <b>clic</b> poser / déplacer · <b>molette</b> taille · <b>Maj + molette</b> rotation · <b>Suppr</b> retirer</li>
         <li><b>N</b> : nuit · <b>V</b> : viseur · <b>C</b> : coulures · <b>X</b> : secouer</li>
         <li>Au doigt : <b>un doigt</b> peint · <b>deux doigts</b> regardent autour · <b>pincer</b> : largeur du jet ·
@@ -177,6 +189,7 @@ export function buildUI() {
     else if (b.dataset.cap) set({ cap: b.dataset.cap, capScale: 1 });
     else if (b.dataset.tool) setTool(b.dataset.tool);
     else if (b.dataset.shape) set({ maskShape: b.dataset.shape });
+    else if (b.dataset.brush) set({ brushSizes: { ...state.brushSizes, [b.dataset.brush]: +b.dataset.size } });
     else if (b.dataset.finish) { finish = b.dataset.finish; setCustom($('#custom-color').value, finish); }
     else if (b.id === 'save-color') { saveCurrentColor(); toast('Couleur enregistrée dans Mes couleurs'); }
     else if (b.id === 'apply-size') set({ wallWidth: +$('#wall-w').value, wallHeight: +$('#wall-h').value });
@@ -276,6 +289,11 @@ export function buildUI() {
     const scr = scraperById(state.tool);
     $('#mask-opts').hidden = state.tool !== 'cache';
     $('#scraper-help').hidden = !scr;
+    const br = brushById(state.tool);
+    panel.querySelectorAll('[data-brush-opts]').forEach(el => { el.hidden = el.dataset.brushOpts !== state.tool; });
+    panel.querySelectorAll('[data-brush]').forEach(b => b.classList.toggle('on', +b.dataset.size === brushSize(brushById(b.dataset.brush), state.brushSizes)));
+    $('#brush-help').hidden = !br;
+    $('#paper-help').hidden = state.tool !== NEWSPAPER.id;
     $('#mask-size').value = Math.round(state.maskSize * 200);
     $('#o-msize').textContent = Math.round(state.maskSize * 200) + ' cm';
     $('#mask-lift').value = Math.round(state.maskLift * 1000);
@@ -293,7 +311,7 @@ export function buildUI() {
     $('#o-distance').textContent = Math.round(state.distance * 100) + ' cm';
     $('#angle').value = state.angle;
     $('#o-angle').textContent = state.angle + '°';
-    $('#angle-row').classList.toggle('dim', state.tool === 'bombe' && state.cap !== 'flat');
+    $('#angle-row').classList.toggle('dim', (state.tool === 'bombe' && state.cap !== 'flat') || state.tool === NEWSPAPER.id || br?.kind === 'rond');
     $('#wall').value = state.wall;
     if ('wallWidth' in patch || 'wallHeight' in patch || patch.init) {
       $('#wall-w').value = state.wallWidth;
@@ -342,6 +360,8 @@ export function buildUI() {
     $('#hud').innerHTML = state.tool === 'cache'
       ? `Caches · ${SHAPES.find(s => s.id === state.maskShape)?.name} ${Math.round(state.maskSize * 200)} cm · décollé de ${Math.round(state.maskLift * 1000)} mm`
       : scr ? `${tool.name} · pression ${Math.round(state.pressure * 100)} % · lame à ${state.angle}°`
+      : br ? `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${tool.name} ${num(Math.round(brushSize(br, state.brushSizes) * 1000) / 10)} cm · pression ${Math.round(state.pressure * 100)} %${br.kind === 'plat' ? ` · ${state.angle}°` : ''}`
+      : state.tool === NEWSPAPER.id ? `Papier journal · pression ${Math.round(state.pressure * 100)} %`
         : `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${cap.name} ${Math.round(state.capScale * 100)} % · ${Math.round(state.distance * 100)} cm · ${Math.round(state.pressure * 100)} %`;
   };
   subscribe(sync);

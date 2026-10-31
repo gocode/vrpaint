@@ -6,6 +6,8 @@ import { World } from './world.js';
 import { state, set, subscribe, actions, currentCap, WALL_LIMITS } from './state.js';
 import { Stencils } from './stencils.js';
 import { Scraper, scraperById } from './scraper.js';
+import { Brush, brushById, brushSize } from './brush.js';
+import { Newspaper, NEWSPAPER } from './newspaper.js';
 import { DesktopControls } from './desktop.js';
 import { XRControls } from './xr.js';
 import { VRPalette } from './vrui.js';
@@ -78,14 +80,26 @@ surface.maskSource = wallCanvas;
 const allCanvases = () => [wallCanvas, ...canvases.overlays];
 const spray = new Spray();
 spray.setCanvases(allCanvases());
-spray.onStrokeStart = () => history.begin('trait');
+// Nouveau geste : ce qui attend encore d'être écrit appartient au geste d'avant
+// (sinon deux gestes rapprochés, dans la même image, ne font qu'une annulation)
+const beginGesture = label => { flushAll(); history.begin(label); };
+spray.onStrokeStart = () => beginGesture('trait');
 // Caches et racloirs
 const stencils = new Stencils({ scene, history, canvases: allCanvases });
 stencils.onChange = () => markDirty();
 const scraper = new Scraper({ project: (o, d, r, u) => spray.project(o, d, r, u) });
-scraper.onStrokeStart = () => history.begin('raclage');
+scraper.onStrokeStart = () => beginGesture('raclage');
 for (const m of scraper.meshes.values()) scene.add(m);
-const tools = { stencils, scraper, spray };
+// Pinceaux et papier journal ; le papier sait où la peinture est encore fraîche
+const brush = new Brush({ project: (o, d, r, u) => spray.project(o, d, r, u) });
+brush.onStrokeStart = () => beginGesture('pinceau');
+const newspaper = new Newspaper({ project: (o, d, r, u) => spray.project(o, d, r, u) });
+newspaper.onStrokeStart = () => beginGesture('papier journal');
+spray.onDeposit = brush.onDeposit = (c, x, y, r) => newspaper.fresh.mark(c, x, y, r);
+for (const m of brush.meshes.values()) scene.add(m);
+scene.add(newspaper.mesh);
+const handTools = [scraper, brush, newspaper];
+const tools = { stencils, scraper, spray, brush, newspaper };
 
 const audio = new SprayAudio();
 const palette = new VRPalette();
@@ -167,12 +181,15 @@ function resizeWall(W, H, { keepPaint = true, record = true } = {}) {
   notify(`Mur de ${W} × ${H} m`);
 }
 // --- Image du mur (photo, vignette de projet, contrôle) -------------------------
-function readWall(w, h) {
+// zone : [x0, y0, x1, y1] en mètres depuis le coin bas gauche du mur (tout le mur sinon)
+function readWall(w, h, zone = null) {
   flushAll();
   const rt = new THREE.WebGLRenderTarget(w, h, { colorSpace: THREE.SRGBColorSpace });
-  const cam = new THREE.OrthographicCamera(-WALL.width / 2, WALL.width / 2, WALL.height, 0, 0.001, 0.1);
+  const [x0, y0, x1, y1] = zone || [0, 0, WALL.width, WALL.height];
+  const cam = new THREE.OrthographicCamera(x0 - WALL.width / 2, x1 - WALL.width / 2, y1, y0, 0.001, 0.1);
   cam.position.set(0, 0, WALL.z + 0.05);
-  const hidden = [world.cursor, world.can, stencils.group, ...scraper.meshes.values()].filter(o => o.visible);
+  const hidden = [world.cursor, world.can, stencils.group, ...scraper.meshes.values(), ...brush.meshes.values(), newspaper.mesh]
+    .filter(o => o.visible);
   hidden.forEach(o => { o.visible = false; });
   const prev = renderer.getRenderTarget(), xrOn = renderer.xr.enabled;
   renderer.xr.enabled = false;
@@ -282,7 +299,8 @@ function nextName() {
 async function newProject() {
   await saveCurrent();
   spray.reset();
-  scraper.reset();
+  for (const t of handTools) t.reset();
+  newspaper.fresh.clear();
   surface.clear(false);
   canvases.disposeAll();
   stencils.load({});
@@ -307,7 +325,8 @@ async function openProject(id, message = null) {
   for (const [cid, layers] of Object.entries(p.extra || {})) canvases.byId(cid)?.ensureSurface().importLayers(layers);
   // projets d'avant les caches : aucun cache, et un fond vide (le raclage révèle le mur)
   stencils.load(p.masks || {});
-  scraper.reset();
+  for (const t of handTools) t.reset();
+  newspaper.fresh.clear();
   history.reset();
   set({ projectId: p.id, projectName: p.name, wall: p.wall || state.wall, savedColors: p.savedColors || [], refs: p.refs || [] });
   loadedId = p.id;
@@ -374,7 +393,7 @@ actions.notify = notify;
 
 actions.undo = () => {
   spray.reset();
-  scraper.reset();
+  for (const t of handTools) t.reset();
   stencils.commit();
   flushAll();
   const rec = history.undo();
@@ -386,7 +405,7 @@ actions.undo = () => {
 // « Tout effacer » vide le mur et les devantures peintes, en un seul geste annulable.
 actions.clear = () => {
   spray.reset();
-  scraper.reset();
+  for (const t of handTools) t.reset();
   history.begin('effacement');
   surface.clear();
   canvases.clearAll(true);
@@ -499,7 +518,7 @@ async function exportAll() {
 
 const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall, stencils, wallCanvas, exportAll, history }) : null;
 window.__vrpaint = {
-  get surface() { return surface; }, spray, history, canvases, stencils, scraper, wallCanvas, exportAll,
+  get surface() { return surface; }, spray, history, canvases, stencils, scraper, brush, newspaper, wallCanvas, exportAll,
   state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator,
 };
 
@@ -520,12 +539,19 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   const presenting = renderer.xr.isPresenting;
   const input = presenting ? xr.update(dt) : desktop.update(dt);
+  // outil relu à chaque pas : le test en change entre deux pas d'une même image
+  const heldTool = () => {
+    const br = brushById(state.tool);
+    return { scr: scraperById(state.tool), br, size: br && brushSize(br, state.brushSizes), paper: state.tool === NEWSPAPER.id };
+  };
   // l'outil en main reçoit l'entrée ; les coulures continuent quoi qu'il arrive
   const step = (h, inp) => {
-    const scr = scraperById(state.tool);
+    const { scr, br, size, paper } = heldTool();
     const sprayed = spray.update(h, state.tool === 'bombe' ? inp : null);
     const scraped = scraper.update(h, scr ? inp : null, scr);
-    return sprayed || scraped;
+    const brushed = brush.update(h, br ? inp : null, br, size, state.paint);
+    const blotted = newspaper.update(h, paper ? inp : null);
+    return sprayed || scraped || brushed || blotted;
   };
   let spraying;
   if (test) {
@@ -538,14 +564,23 @@ renderer.setAnimationLoop(() => {
   flushAll();
   world.update(dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera, renderer.getPixelRatio());
   audio.setSpray(spray.pressure, spray.cap);
-  audio.setScrape(scraper.pressure, scraper.speed);
+  // frottement : la lame crisse, le pinceau et le papier frôlent
+  const rub = brush.contact ? [brush.pressure * 0.3, brush.speed] : newspaper.contact ? [newspaper.pressure * 0.45, newspaper.speed]
+    : [scraper.pressure, scraper.speed];
+  audio.setScrape(...rub);
   audio.setTraffic(world.traffic.nearest(camera.getWorldPosition(_camPos)));
-  const scr = scraperById(state.tool);
-  if (scr) world.updateCursor(scraper.hit, null, state.aim && !!input && !test && !presenting, [scr.width / 2, 0.0025]);
+  const { scr, br, size, paper } = heldTool();
+  const aimed = state.aim && !!input && !test && !presenting;
+  if (scr) world.updateCursor(scraper.hit, null, aimed, [scr.width / 2, 0.0025]);
+  else if (br) world.updateCursor(brush.hit, null, aimed, brush.footprint(br, size, brush.contact ? brush.pressure : state.pressure));
+  else if (paper) world.updateCursor(newspaper.hit, null, aimed, [NEWSPAPER.radius * 0.7, NEWSPAPER.radius * 0.7]);
   else world.updateCursor(spray.hit, spray.cap, state.aim && !!input && !test && (!presenting || (spray.hit && spray.hit.t < 0.9)));
   const inHand = presenting || (!!input && !test);
   world.can.visible = inHand && state.tool === 'bombe';
   for (const [id, m] of scraper.meshes) m.visible = inHand && id === state.tool;
+  for (const [id, m] of brush.meshes) m.visible = inHand && id === state.tool;
+  if (br) brush.updateMesh(br, size, state.paint);
+  newspaper.mesh.visible = inHand && paper;
   world.updateLift(rig);
 
   if (dirty && !saving && !spraying && !spray.drips.length && performance.now() - lastPaint > 4000 && !test) saveCurrent();

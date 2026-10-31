@@ -79,6 +79,7 @@ export class Spray {
     this.cap = CAPS[1];
     this.dripsEnabled = true;
     this.onStrokeStart = null;
+    this.onDeposit = null;     // (toile, x, y, rayon) : peinture fraîche (voir newspaper.js)
     this.hit = null;
     this.pressure = 0;
   }
@@ -207,6 +208,8 @@ export class Spray {
       S.push(u + (g1 * ax + g2 * bx) / W, v + (g1 * ay + g2 * by) / H, 0.9, 1,
         s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint, s.x, s.y, s.t);
     }
+
+    if (mass > 0) this.onDeposit?.(canvas, s.x, s.y, 2 * Math.max(sx, sy));
 
     // Peinture fraîche accumulée sous le jet.
     const w = this._wet(canvas);

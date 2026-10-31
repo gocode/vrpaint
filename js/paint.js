@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TILE, LAYERS as LAYER_DEFS, tileRect } from './history.js';
 import { MAX_MASKS, MASK_GLSL, packMasks } from './stencils.js';
+import { CRUMPLE_GLSL } from './newspaper.js';
 
 let uidCounter = 0;
 
@@ -18,6 +19,9 @@ let uidCounter = 0;
 //
 // Caches : chaque toile a jusqu'à MAX_MASKS pochoirs, évalués analytiquement
 // dans le shader des tampons (net à toute résolution, rien à allouer).
+//
+// Papier journal : comme le raclage, il ramène la couche visible vers le fond
+// (motif de papier froissé, voir newspaper.js), mais ne touche jamais au fond.
 
 const STAMP_VERT = /* glsl */`
 attribute vec4 iA; // u, v, alpha (ou dose), dureté
@@ -134,6 +138,45 @@ void main() {
   gl_FragColor = vec4(0.0, 0.0, 0.0, e);
 }`;
 
+// Papier journal : un disque par appui (ou par pas de 5 mm en frottant), motif
+// évalué dans le repère du papier. Un appui qui s'affermit au même endroit
+// n'emporte que la différence entre les deux pressions : 1 − (1 − e1) / (1 − e0).
+const BLOT_VERT = /* glsl */`
+attribute vec4 jA;   // centre x, y (m), cos, sin de la rotation du papier
+attribute vec4 jB;   // rayon (m), graine, pression d'avant, pression
+attribute vec4 jC;   // force (fraîcheur, appui ou frottement), plis par mètre, roulement (m, repère du papier)
+uniform vec2 uWall;
+varying vec2 vP;
+varying vec2 vL;
+varying vec4 vB;
+varying vec4 vC;
+void main() {
+  vec2 q = position.xy * 2.0 * jB.x;
+  vP = jA.xy + q;
+  vL = vec2(jA.z * q.x + jA.w * q.y, -jA.w * q.x + jA.z * q.y) + jC.zw;
+  vB = jB;
+  vC = jC;
+  gl_Position = vec4(vP / uWall * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const BLOT_FRAG = /* glsl */`
+varying vec2 vP;
+varying vec2 vL;
+varying vec4 vB;
+varying vec4 vC;
+${MASK_GLSL}
+${CRUMPLE_GLSL}
+void main() {
+  vec2 Q = vL - vC.zw;   // position dans le contact (la boule est bombée : le centre touche d'abord)
+  float r2 = dot(Q, Q) / (vB.x * vB.x);
+  if (r2 >= 1.0) discard;
+  float Hd = crumple(vL, vB.y, vC.y) - 0.6 * r2;
+  float fw = max(length(vec2(dFdx(Hd), dFdy(Hd))), 1e-4);   // pente par texel
+  float e1 = vC.x * blotLift(vB.w, Hd, fw), e0 = vC.x * blotLift(vB.z, Hd, fw);
+  float e = clamp(1.0 - (1.0 - e1) / max(1.0 - e0, 1e-3), 0.0, 1.0);
+  gl_FragColor = vec4(0.0, 0.0, 0.0, e * maskOpen(vP, vec3(0.0)));
+}`;
+
 const QUAD_VERT = /* glsl */`
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = vec4(position.xy * 2.0, 0.0, 1.0); }`;
@@ -194,6 +237,7 @@ const LAYERS = LAYER_DEFS.map(L => L.key);
 const SHOWN = ['color', 'aux', 'glow'];
 const FOND = { color: 'fondColor', aux: 'fondAux', glow: 'fondGlow' };
 const MAX_QUADS = 1024;
+const MAX_BLOTS = 256;
 
 export class PaintSurface {
   constructor(renderer, { width, height, res, auxRes, history = null, maxStamps = 8192 }) {
@@ -302,6 +346,35 @@ export class PaintSurface {
     smesh.frustumCulled = false;
     this.scrapeScene.add(smesh);
     this.tool = null;
+
+    // Lot du papier journal : disques instanciés, même mélange multiplicatif
+    this.bcount = 0;
+    const bgeo = new THREE.InstancedBufferGeometry();
+    bgeo.index = quad.index;
+    bgeo.setAttribute('position', quad.getAttribute('position'));
+    this.battrs = {};
+    for (const name of ['jA', 'jB', 'jC']) {
+      const attr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BLOTS * 4), 4);
+      attr.setUsage(THREE.DynamicDrawUsage);
+      bgeo.setAttribute(name, attr);
+      this.battrs[name] = attr;
+    }
+    this.bgeo = bgeo;
+    this.blotMat = new THREE.ShaderMaterial({
+      vertexShader: BLOT_VERT, fragmentShader: BLOT_FRAG,
+      uniforms: { uWall: stampUniforms.uWall, ...this.maskUniforms },
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      depthTest: false, depthWrite: false, transparent: true,
+    });
+    this.blotScene = new THREE.Scene();
+    const bmesh = new THREE.Mesh(bgeo, this.blotMat);
+    bmesh.frustumCulled = false;
+    this.blotScene.add(bmesh);
 
     // Quad plein écran pour copies / encodage / décodage
     this.cam = new THREE.Camera();
@@ -467,7 +540,7 @@ export class PaintSurface {
   flush() {
     let n = 0;
     if (this.count) n += this._flushStamps();
-    if (this.scount) n += this._flushScrape();
+    if (this.scount || this.bcount) n += this._flushLift();
     return n;
   }
 
@@ -521,7 +594,7 @@ export class PaintSurface {
   // tool : { width, streak, chip, deep, flex, nicks, chips, streaks } (voir scraper.js) ; seed : un par geste
   setTool(tool, seed) {
     if (this.tool === tool && this.toolSeed === seed) return;
-    if (this.scount) this._flushScrape();
+    if (this.scount) this._flushLift();
     this.tool = tool;
     this.toolSeed = seed;
     const U = this.scrapeMat.uniforms;
@@ -533,7 +606,7 @@ export class PaintSurface {
   // Quadrilatère balayé par la lame : extrémités gauche/droite avant (l0, r0) et après (r1, l1),
   // en mètres sur la toile ; p0, p1 : pression effective à chaque position.
   pushScrape(l0x, l0y, r0x, r0y, r1x, r1y, l1x, l1y, p0, p1) {
-    if (this.scount >= MAX_QUADS) this._flushScrape();
+    if (this.scount >= MAX_QUADS) this._flushLift();
     const W = this.width, H = this.height, P = this.sPos;
     const q = this.scount++;
     const pts = [l0x, l0y, r0x, r0y, r1x, r1y, l1x, l1y];
@@ -548,11 +621,26 @@ export class PaintSurface {
     this._addTiles(this.spending, x0 * RW - 2, y0 * RH - 2, x1 * RW + 2, y1 * RH + 2);
   }
 
+  // Papier journal : disque de rayon R (m) centré en (x, y), papier tourné de th ;
+  // p0 : pression déjà appliquée à cet endroit par cet appui (0 sinon) ; roll : chemin roulé (m).
+  pushBlot(x, y, th, R, seed, p0, p1, strength, fold, rollX = 0, rollY = 0) {
+    if (this.bcount >= MAX_BLOTS) this._flushLift();
+    const i = this.bcount++ * 4;
+    const A = this.battrs.jA.array, B = this.battrs.jB.array, C = this.battrs.jC.array;
+    A[i] = x; A[i + 1] = y; A[i + 2] = Math.cos(th); A[i + 3] = Math.sin(th);
+    B[i] = R; B[i + 1] = seed; B[i + 2] = p0; B[i + 3] = p1;
+    C[i] = strength; C[i + 1] = fold; C[i + 2] = rollX; C[i + 3] = rollY;
+    const [RW, RH] = this.res;
+    this._addTiles(this.spending, (x - R) / this.width * RW - 2, (y - R) / this.height * RH - 2,
+      (x + R) / this.width * RW + 2, (y + R) / this.height * RH + 2);
+  }
+
   // Couche visible c, fond f : on racle l'écart (c − f), puis le fond. Résultat
   // f·(1−kd) + (c−f)·(1−k1)·(1−kd), exact quel que soit le recouvrement des quads.
+  // Le papier journal multiplie aussi l'écart, sans toucher au fond.
   // Les passes ± fond se limitent aux carreaux touchés, sauvegardés par l'historique.
-  _flushScrape() {
-    const n = this.scount;
+  _flushLift() {
+    const n = this.scount, nb = this.bcount;
     for (const name of ['position', 'aS']) {
       const a = this.sgeo.getAttribute(name);
       a.clearUpdateRanges();
@@ -560,6 +648,12 @@ export class PaintSurface {
       a.needsUpdate = true;
     }
     this.sgeo.setDrawRange(0, n * 6);
+    for (const attr of Object.values(this.battrs)) {
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(0, nb * 4);
+      attr.needsUpdate = true;
+    }
+    this.bgeo.instanceCount = nb;
     const tiles = this._protect(this.spending);
     this._syncMasks();
     const r = this.renderer, U = this.scrapeMat.uniforms, colorTex = this.targets.color.texture;
@@ -576,12 +670,17 @@ export class PaintSurface {
           this._unscissor(shown);
         };
         for (const R of zone) pass(this.subMat, R);
-        U.uMode.value = 0;
         r.setRenderTarget(shown);
-        r.render(this.scrapeScene, this.cam);
-        U.uMode.value = 1;
-        r.setRenderTarget(fond);
-        r.render(this.scrapeScene, this.cam);
+        if (n) {
+          U.uMode.value = 0;
+          r.render(this.scrapeScene, this.cam);
+        }
+        if (nb) r.render(this.blotScene, this.cam);
+        if (n) {
+          U.uMode.value = 1;
+          r.setRenderTarget(fond);
+          r.render(this.scrapeScene, this.cam);
+        }
         zone.forEach((R, i) => {
           if (L.key === 'color' && i === zone.length - 1) colorTex.generateMipmaps = true;
           pass(this.addMat, R);
@@ -592,7 +691,8 @@ export class PaintSurface {
       this._end();
     }
     this.scount = 0;
-    return n;
+    this.bcount = 0;
+    return n + nb;
   }
 
   allTiles() {
@@ -656,7 +756,8 @@ export class PaintSurface {
     this.disposed = true;
     this.geo.dispose();
     this.sgeo.dispose();
-    for (const m of [this.stampMat, this.fondMat, this.scrapeMat, this.copyMat, this.encodeMat, this.decodeMat,
+    this.bgeo.dispose();
+    for (const m of [this.stampMat, this.fondMat, this.scrapeMat, this.blotMat, this.copyMat, this.encodeMat, this.decodeMat,
       this.zeroMat, this.resampleMat, this.subMat, this.addMat]) m.dispose();
   }
 
