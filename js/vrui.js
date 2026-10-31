@@ -136,6 +136,7 @@ export class VRPalette {
     this.hover = null;
     this.message = '';
     this.messageUntil = 0;
+    this.exitArmedUntil = 0;
     this.thumbs = new Map();
     this.pendW = state.wallWidth;
     this.pendH = state.wallHeight;
@@ -177,11 +178,11 @@ export class VRPalette {
     c.textBaseline = 'alphabetic';
   }
 
-  _text(str, x, y, size = 30, color = '#9aa0ab', weight = 400) {
+  _text(str, x, y, size = 30, color = '#9aa0ab', weight = 400, maxW = undefined) {
     const c = this.ctx;
     c.fillStyle = color;
     c.font = `${weight} ${size}px ${FONT}`;
-    c.fillText(str, x, y);
+    c.fillText(str, x, y, maxW);
   }
 
   draw() {
@@ -200,9 +201,15 @@ export class VRPalette {
     c.fillStyle = '#ffffffaa';
     c.font = `600 26px ${FONT}`;
     c.fillText('✎', 126, 126);
-    this._text(state.paint.name, 170, 66, 44, '#f2f2f2', 600);
+    this._text(state.paint.name, 170, 66, 44, '#f2f2f2', 600, 560);
     const msg = performance.now() < this.messageUntil ? this.message : `${state.projectName} · ${state.paint.group}`;
-    this._text(msg, 170, 114, 30);
+    this._text(msg, 170, 114, 30, undefined, undefined, 560);
+
+    // Sortie du casque vers la page du navigateur, quel que soit l'onglet ouvert.
+    // Deux appuis : un geste de peinture qui frôle la palette ne coupe pas la séance.
+    const armed = performance.now() < this.exitArmedUntil;
+    this._button(reg({ type: 'btn', id: 'exitXR', x: 752, y: 30, w: 240, h: 92 }),
+      armed ? 'Confirmer ?' : 'Quitter la VR', { danger: armed, size: 30 });
 
     TABS.forEach(([id, label], i) => {
       this._button(reg({ type: 'tab', id, x: 32 + i * 161, y: 146, w: 153, h: 70 }), label, { on: this.tab === id, size: 26 });
@@ -531,6 +538,13 @@ export class VRPalette {
       photo: () => actions.photo(),
       newProject: () => actions.newProject(),
       downloadProject: () => actions.downloadProject(),
+      exitXR: () => {
+        if (performance.now() < this.exitArmedUntil) { this.exitArmedUntil = 0; return actions.exitXR(); }
+        this.exitArmedUntil = performance.now() + 3000;
+        this.flash('Appuyez encore pour revenir au navigateur');
+        clearTimeout(this._exitTimer);
+        this._exitTimer = setTimeout(() => this.draw(), 3100);
+      },
       wallPrev: () => set({ wall: WALLS[(i - 1 + WALLS.length) % WALLS.length].id }),
       wallNext: () => set({ wall: WALLS[(i + 1) % WALLS.length].id }),
       decW: () => { this.pendW = clamp(this.pendW - wStep, wMin, wMax); this.draw(); },
