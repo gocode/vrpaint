@@ -564,12 +564,13 @@ export class World {
     capMat.color.set(paint.kind === 'std' ? '#f4f4f0' : paint.hex);
   }
 
-  // Viseur : ellipse de 1,5 sigma (trait visible) posée sur le mur.
-  updateCursor(hit, cap, show) {
+  // Viseur : ellipse de 1,5 sigma (trait visible) posée sur le mur ;
+  // size = [demi-axes] impose sa taille (fil d'une lame de racloir).
+  updateCursor(hit, cap, show, size = null) {
     if (!show || !hit) { this.cursor.visible = false; return; }
     const f = hit.canvas ? hit.canvas.frame : this.wallFrame;
-    const sigma = hit.t * Math.tan(cap.angle * Math.PI / 180) * 1.5;
-    const ka = sigma * cap.sx, kb = sigma * cap.sy;
+    const sigma = size ? 0 : hit.t * Math.tan(cap.angle * Math.PI / 180) * 1.5;
+    const [ka, kb] = size || [sigma * cap.sx, sigma * cap.sy];
     const A = new THREE.Vector3().addScaledVector(f.ex, hit.rx * ka).addScaledVector(f.ey, hit.ry * ka);
     const B = new THREE.Vector3().addScaledVector(f.ex, hit.ux * kb).addScaledVector(f.ey, hit.uy * kb);
     const T = f.corner.clone().addScaledVector(f.ex, hit.x).addScaledVector(f.ey, hit.y).addScaledVector(f.n, 0.003);

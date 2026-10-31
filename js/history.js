@@ -12,7 +12,15 @@ import * as THREE from 'three';
 export const TILE = 256;     // carreau de la couche couleur (texels)
 const SLOT_AUX = 128;        // emplacement réservé aux couches matière / émission
 const PAGE = 1024;           // page d'atlas couleur : 4 × 4 emplacements
-const PAGE_BYTES = PAGE * PAGE * 8 + 2 * (PAGE / 2) * (PAGE / 2) * 8;
+
+// Couches d'une surface peinte. Les trois premières sont affichées ; les trois
+// « fond » gardent, sous chaque trait, ce qu'il recouvrait (révélé au raclage).
+// full : couche à la résolution de la couleur (sinon, au quart).
+export const LAYERS = [
+  { key: 'color', full: true }, { key: 'aux', full: false }, { key: 'glow', full: false },
+  { key: 'fondColor', full: true }, { key: 'fondAux', full: false }, { key: 'fondGlow', full: false },
+];
+const PAGE_BYTES = LAYERS.reduce((n, L) => n + (L.full ? PAGE * PAGE : (PAGE / 2) * (PAGE / 2)) * 8, 0);
 
 const QUAD_VERT = /* glsl */`
 varying vec2 vUv;
@@ -23,6 +31,22 @@ uniform sampler2D tSrc;
 uniform vec4 uRect;   // zone source en uv : x, y, largeur, hauteur
 varying vec2 vUv;
 void main() { gl_FragColor = texture2D(tSrc, uRect.xy + vUv * uRect.zw); }`;
+
+// Zone d'un carreau dans une couche (texels, arrondie vers l'extérieur) et,
+// si un emplacement d'atlas est donné, sa place dans cet emplacement.
+export function tileRect(surface, key, layer, slot = null) {
+  const [tx, ty] = key.split(',').map(Number);
+  const [W, H] = surface.res;
+  const target = surface.targets[layer.key];
+  const s = layer.full ? TILE : SLOT_AUX;
+  const u0 = tx * TILE / W, v0 = ty * TILE / H;
+  const uw = Math.min(TILE, W - tx * TILE) / W, vh = Math.min(TILE, H - ty * TILE) / H;
+  const x0 = Math.floor(u0 * target.width), y0 = Math.floor(v0 * target.height);
+  const x1 = Math.min(target.width, Math.ceil((u0 + uw) * target.width));
+  const y1 = Math.min(target.height, Math.ceil((v0 + vh) * target.height));
+  const w = Math.min(s, x1 - x0), h = Math.min(s, y1 - y0);
+  return { target, x0, y0, w, h, ax: slot ? slot.i * s : 0, ay: slot ? slot.j * s : 0, atlas: slot ? slot.page[layer.key] : null };
+}
 
 export class History {
   constructor(renderer, { budgetBytes, maxRecords = 400 }) {
@@ -51,7 +75,7 @@ export class History {
   // --- gestes -----------------------------------------------------------------
   begin(label = '') {
     this._close();
-    this.current = { type: 'tiles', label, entries: [], keys: new Set(), empty: true };
+    this.current = { type: 'tiles', label, entries: [], keys: new Set(), slots: new Map(), empty: true };
   }
 
   _close() {
@@ -73,6 +97,11 @@ export class History {
     this.onChange?.();
   }
 
+  // Contenu d'un carreau au début du geste en cours (null s'il n'a pas pu être gardé).
+  slotOf(surface, key) {
+    return this.current?.slots.get(surface.uid + ':' + key) || null;
+  }
+
   // Appelé par une surface juste avant d'écrire dans ces carreaux.
   protect(surface, keys) {
     if (!this.current) this.begin();
@@ -85,6 +114,7 @@ export class History {
       if (!slot) { rec.partial = true; continue; }
       this._copyTile(surface, key, slot, true);
       rec.entries.push({ surface, key, slot });
+      rec.slots.set(id, slot);
       rec.empty = false;
     }
   }
@@ -156,7 +186,8 @@ export class History {
       type: THREE.HalfFloatType, depthBuffer: false, stencilBuffer: false,
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     });
-    const page = { color: rt(PAGE), aux: rt(PAGE / 2), glow: rt(PAGE / 2) };
+    const page = {};
+    for (const L of LAYERS) page[L.key] = rt(L.full ? PAGE : PAGE / 2);
     this.pages.push(page);
     const n = PAGE / TILE;
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) this.free.push({ page, i, j });
@@ -168,20 +199,9 @@ export class History {
     const prev = { rt: r.getRenderTarget(), xr: r.xr.enabled, autoClear: r.autoClear };
     r.xr.enabled = false;
     r.autoClear = false;
-    const [tx, ty] = key.split(',').map(Number);
-    const [W, H] = surface.res;
-    const u0 = tx * TILE / W, v0 = ty * TILE / H;
-    const uw = Math.min(TILE, W - tx * TILE) / W, vh = Math.min(TILE, H - ty * TILE) / H;
-    for (const layer of ['color', 'aux', 'glow']) {
-      const target = surface.targets[layer], atlas = slot.page[layer];
-      const s = layer === 'color' ? TILE : SLOT_AUX;
-      // zone du carreau dans la couche (en texels), arrondie vers l'extérieur
-      const x0 = Math.floor(u0 * target.width), y0 = Math.floor(v0 * target.height);
-      const x1 = Math.min(target.width, Math.ceil((u0 + uw) * target.width));
-      const y1 = Math.min(target.height, Math.ceil((v0 + vh) * target.height));
-      const w = Math.min(s, x1 - x0), h = Math.min(s, y1 - y0);
+    for (const layer of LAYERS) {
+      const { target, x0, y0, w, h, ax, ay, atlas } = tileRect(surface, key, layer, slot);
       if (w <= 0 || h <= 0) continue;
-      const ax = slot.i * s, ay = slot.j * s;
       if (save) {
         this._blit(target.texture, [x0 / target.width, y0 / target.height, w / target.width, h / target.height], atlas, [ax, ay, w, h]);
       } else {

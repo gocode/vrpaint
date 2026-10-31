@@ -2,9 +2,11 @@ import { PAINTS, GROUPS, FINISHES, finishOf } from './palette.js';
 import { CAPS, strokeWidthCm } from './spray.js';
 import {
   state, set, subscribe, actions, WALLS, WALL_LIMITS, CAP_SCALE, currentCap,
-  setCustom, savedPaints, saveCurrentColor, removeSavedColor,
+  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool,
 } from './state.js';
-import { drawCapIcon, editorHex } from './vrui.js';
+import { drawCapIcon, drawToolIcon, editorHex } from './vrui.js';
+import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon } from './stencils.js';
+import { scraperById } from './scraper.js';
 import { importImage, addRefs, removeRef, currentRef, REF_SIDES } from './refs.js';
 import { SPECTATOR_MODES } from './spectator.js';
 import { projectsWhere } from './storage.js';
@@ -42,6 +44,29 @@ export function buildUI() {
       ${GROUPS.map(g => `<h2>${g}</h2><div class="swatches">${PAINTS.filter(p => p.group === g).map(swatch).join('')}</div>`).join('')}
     </section>
     <section>
+      <h2>Outil</h2>
+      <div class="caps" id="tools">${TOOLS.map(t => `
+        <button type="button" class="cap" data-tool="${t.id}" title="${esc(t.hint)}">
+          <canvas width="96" height="60"></canvas><span>${t.name}</span></button>`).join('')}
+      </div>
+      <div id="mask-opts">
+        <h2>Forme du cache</h2>
+        <div class="caps" id="shapes">${SHAPES.map(sh => `
+          <button type="button" class="cap" data-shape="${sh.id}" title="${sh.name}">
+            <canvas width="96" height="60"></canvas><span>${sh.name}</span></button>`).join('')}
+        </div>
+        <label class="slider">Taille du prochain cache <output id="o-msize"></output>
+          <input type="range" id="mask-size" min="${MASK_SIZE[0] * 200}" max="${MASK_SIZE[1] * 200}" step="1"></label>
+        <label class="slider">Décollement du mur <output id="o-mlift"></output>
+          <input type="range" id="mask-lift" min="${MASK_LIFT[0] * 1000}" max="${MASK_LIFT[1] * 1000}" step="1"></label>
+        <button type="button" data-action="removeMasks" class="wide">Retirer tous les caches</button>
+        <p class="help">Clic sur le mur : poser un cache (glisser pour le placer) · clic sur un cache : le déplacer ·
+          molette dessus : taille · Maj + molette : rotation · Suppr : le retirer. Plaqué, le bord est net ; décollé, il s'estompe.</p>
+      </div>
+      <p class="help" id="scraper-help">Glisser sur le mur pour racler : la lame retire la dernière couche et laisse voir
+        celle du dessous ; à forte pression, elle va jusqu'au mur. Molette : pression · Maj + molette : angle de la lame.</p>
+    </section>
+    <section>
       <h2>Cap</h2>
       <div class="caps">${CAPS.map((c, i) => `
         <button type="button" class="cap" data-cap="${c.id}" title="${c.hint} (touche ${i + 1})">
@@ -53,7 +78,7 @@ export function buildUI() {
         <input type="range" id="pressure" min="10" max="100" step="5"></label>
       <label class="slider">Distance au mur <output id="o-distance"></output>
         <input type="range" id="distance" min="2" max="80" step="1"></label>
-      <label class="slider" id="angle-row">Angle du flat cap <output id="o-angle"></output>
+      <label class="slider" id="angle-row">Angle (flat cap, lame, cache) <output id="o-angle"></output>
         <input type="range" id="angle" min="-90" max="90" step="5"></label>
     </section>
     <section>
@@ -108,12 +133,16 @@ export function buildUI() {
         <li><b>Clic droit + glisser</b> : regarder autour</li>
         <li><b>ZQSD</b> ou flèches : se déplacer · <b>A / E</b> : descendre / monter</li>
         <li><b>1 à 5</b> : caps · <b>Ctrl + Z</b> : annuler</li>
+        <li><b>B</b> : bombe · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir)</li>
+        <li>Caches : <b>clic</b> poser / déplacer · <b>molette</b> taille · <b>Maj + molette</b> rotation · <b>Suppr</b> retirer</li>
         <li><b>N</b> : nuit · <b>V</b> : viseur · <b>C</b> : coulures · <b>X</b> : secouer</li>
       </ul>
       <p class="help">Casque Quest : gâchette = peindre (pression analogique), viser la palette de l'autre main pour choisir. Toucher la pastille du haut pour personnaliser la couleur. Joystick gauche : marcher, droit : tourner / nacelle. A : viseur, B : annuler, X : palette, Y : nuit.</p>
     </details>`;
 
-  panel.querySelectorAll('.cap canvas').forEach((cv, i) => drawCapIcon(cv.getContext('2d'), CAPS[i], 0, 0, cv.width, cv.height, '#e8e8e8'));
+  panel.querySelectorAll('[data-cap] canvas').forEach((cv, i) => drawCapIcon(cv.getContext('2d'), CAPS[i], 0, 0, cv.width, cv.height, '#e8e8e8'));
+  panel.querySelectorAll('[data-tool] canvas').forEach((cv, i) => drawToolIcon(cv.getContext('2d'), TOOLS[i].id, 0, 0, cv.width, cv.height, '#e8e8e8'));
+  panel.querySelectorAll('[data-shape] canvas').forEach((cv, i) => drawShapeIcon(cv.getContext('2d'), SHAPES[i].id, 0, 0, cv.width, cv.height, '#9cc8e8'));
 
   const editor = $('#editor');
   let finish = finishOf(state.paint);
@@ -130,6 +159,8 @@ export function buildUI() {
     if (b.id === 'edit-current') openEditor();
     else if (b.dataset.paint) set({ paint: findPaint(b.dataset.paint) });
     else if (b.dataset.cap) set({ cap: b.dataset.cap, capScale: 1 });
+    else if (b.dataset.tool) setTool(b.dataset.tool);
+    else if (b.dataset.shape) set({ maskShape: b.dataset.shape });
     else if (b.dataset.finish) { finish = b.dataset.finish; setCustom($('#custom-color').value, finish); }
     else if (b.id === 'save-color') { saveCurrentColor(); toast('Couleur enregistrée dans Mes couleurs'); }
     else if (b.id === 'apply-size') set({ wallWidth: +$('#wall-w').value, wallHeight: +$('#wall-h').value });
@@ -152,6 +183,8 @@ export function buildUI() {
   $('#pressure').addEventListener('input', e => set({ pressure: e.target.value / 100 }));
   $('#distance').addEventListener('input', e => set({ distance: e.target.value / 100 }));
   $('#angle').addEventListener('input', e => set({ angle: +e.target.value }));
+  $('#mask-size').addEventListener('input', e => set({ maskSize: e.target.value / 200 }));
+  $('#mask-lift').addEventListener('input', e => set({ maskLift: e.target.value / 1000 }));
   $('#wall').addEventListener('change', e => set({ wall: e.target.value }));
   const sizeInput = () => {
     const w = +$('#wall-w').value, h = +$('#wall-h').value;
@@ -213,7 +246,16 @@ export function buildUI() {
       $('#saved-colors').innerHTML = saved.length ? saved.map(swatch).join('') : '<p class="help">Aucune pour l\'instant : personnalise une couleur puis « Enregistrer ».</p>';
     }
     panel.querySelectorAll('.sw').forEach(b => b.classList.toggle('on', b.dataset.paint === p.id));
-    panel.querySelectorAll('.cap').forEach(b => b.classList.toggle('on', b.dataset.cap === state.cap));
+    panel.querySelectorAll('[data-cap]').forEach(b => b.classList.toggle('on', b.dataset.cap === state.cap));
+    panel.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === state.tool));
+    panel.querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('on', b.dataset.shape === state.maskShape));
+    const scr = scraperById(state.tool);
+    $('#mask-opts').hidden = state.tool !== 'cache';
+    $('#scraper-help').hidden = !scr;
+    $('#mask-size').value = Math.round(state.maskSize * 200);
+    $('#o-msize').textContent = Math.round(state.maskSize * 200) + ' cm';
+    $('#mask-lift').value = Math.round(state.maskLift * 1000);
+    $('#o-mlift').textContent = Math.round(state.maskLift * 1000) + ' mm';
     if (!editor.hidden) {
       if ('paint' in patch || patch.init) $('#custom-color').value = editorHex(p);
       panel.querySelectorAll('[data-finish]').forEach(b => b.classList.toggle('on', b.dataset.finish === finish));
@@ -227,7 +269,7 @@ export function buildUI() {
     $('#o-distance').textContent = Math.round(state.distance * 100) + ' cm';
     $('#angle').value = state.angle;
     $('#o-angle').textContent = state.angle + '°';
-    $('#angle-row').classList.toggle('dim', state.cap !== 'flat');
+    $('#angle-row').classList.toggle('dim', state.tool === 'bombe' && state.cap !== 'flat');
     $('#wall').value = state.wall;
     if ('wallWidth' in patch || 'wallHeight' in patch || patch.init) {
       $('#wall-w').value = state.wallWidth;
@@ -268,7 +310,11 @@ export function buildUI() {
       $('#projects-where').textContent = where === 'pc' ? 'Enregistrés sur le PC : les mêmes dans le casque.'
         : where === 'navigateur' ? 'Enregistrés dans ce navigateur seulement (jeu non servi par le PC).' : '';
     }
-    $('#hud').innerHTML = `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${cap.name} ${Math.round(state.capScale * 100)} % · ${Math.round(state.distance * 100)} cm · ${Math.round(state.pressure * 100)} %`;
+    const tool = TOOLS.find(t => t.id === state.tool);
+    $('#hud').innerHTML = state.tool === 'cache'
+      ? `Caches · ${SHAPES.find(s => s.id === state.maskShape)?.name} ${Math.round(state.maskSize * 200)} cm · décollé de ${Math.round(state.maskLift * 1000)} mm`
+      : scr ? `${tool.name} · pression ${Math.round(state.pressure * 100)} % · lame à ${state.angle}°`
+        : `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${cap.name} ${Math.round(state.capScale * 100)} % · ${Math.round(state.distance * 100)} cm · ${Math.round(state.pressure * 100)} %`;
   };
   subscribe(sync);
   sync({ init: true });

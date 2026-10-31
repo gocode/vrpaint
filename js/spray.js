@@ -186,7 +186,8 @@ export class Spray {
 
     // Nuage fin : profil gaussien, le shader convertit la dose en couverture.
     const dose = mass * 0.85 / (2 * Math.PI * detDraw);
-    S.push(u, v, dose, 0, ax * 3, ay * 3, bx * 3, by * 3, paint);
+    // la buse (s.x, s.y, à s.t du mur) sert à la parallaxe des caches décollés
+    S.push(u, v, dose, 0, ax * 3, ay * 3, bx * 3, by * 3, paint, s.x, s.y, s.t);
 
     // Gouttelettes : grain de la bombe, plus un halo d'overspray.
     let nd = Math.floor(DROP_RATE * cap.flow ** 0.8 * pf * eff * dt + Math.random());
@@ -199,12 +200,12 @@ export class Spray {
       let a = (far ? 0.35 : 0.7) * (0.5 + Math.random() * 0.5);
       if (r < minR) { a *= (r / minR) ** 2; r = minR; }
       S.push(u + (g1 * ax + g2 * bx) / W, v + (g1 * ay + g2 * by) / H, a, 1,
-        s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint);
+        s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint, s.x, s.y, s.t);
     }
     if (p < 0.45 && Math.random() < dt * 10 * (0.45 - p)) {
       const r = 0.0015 + Math.random() * 0.002, g1 = gauss(), g2 = gauss();
       S.push(u + (g1 * ax + g2 * bx) / W, v + (g1 * ay + g2 * by) / H, 0.9, 1,
-        s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint);
+        s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint, s.x, s.y, s.t);
     }
 
     // Peinture fraîche accumulée sous le jet.

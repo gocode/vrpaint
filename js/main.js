@@ -4,6 +4,8 @@ import { Spray } from './spray.js';
 import { PaintSurface } from './paint.js';
 import { World } from './world.js';
 import { state, set, subscribe, actions, currentCap, WALL_LIMITS } from './state.js';
+import { Stencils } from './stencils.js';
+import { Scraper, scraperById } from './scraper.js';
 import { DesktopControls } from './desktop.js';
 import { XRControls } from './xr.js';
 import { VRPalette } from './vrui.js';
@@ -53,8 +55,9 @@ const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
 
-// Historique d'annulation commun à toutes les surfaces (budget mémoire GPU)
-const history = new History(renderer, { budgetBytes: mobile ? 120e6 : 600e6 });
+// Historique d'annulation commun à toutes les surfaces (budget mémoire GPU ;
+// chaque carreau garde aussi sa couche « fond », d'où un budget plus large)
+const history = new History(renderer, { budgetBytes: mobile ? 200e6 : 900e6 });
 let surface = new PaintSurface(renderer, surfaceOptions(WALL.width, WALL.height));
 const world = new World(scene, renderer, surface, WALL);
 rig.add(world.lift);
@@ -68,16 +71,26 @@ const wallCanvas = {
   get width() { return WALL.width; },
   get height() { return WALL.height; },
   ensureSurface: () => surface,
+  masks: [],
+  maskVersion: 0,
 };
+surface.maskSource = wallCanvas;
 const allCanvases = () => [wallCanvas, ...canvases.overlays];
 const spray = new Spray();
 spray.setCanvases(allCanvases());
 spray.onStrokeStart = () => history.begin('trait');
+// Caches et racloirs
+const stencils = new Stencils({ scene, history, canvases: allCanvases });
+stencils.onChange = () => markDirty();
+const scraper = new Scraper({ project: (o, d, r, u) => spray.project(o, d, r, u) });
+scraper.onStrokeStart = () => history.begin('raclage');
+for (const m of scraper.meshes.values()) scene.add(m);
+const tools = { stencils, scraper, spray };
 
 const audio = new SprayAudio();
 const palette = new VRPalette();
-const desktop = new DesktopControls({ camera, rig, canvas, world, audio, wall: WALL, canvases: allCanvases });
-const xr = new XRControls({ renderer, rig, camera, palette, world, audio, wall: WALL });
+const desktop = new DesktopControls({ camera, rig, canvas, world, audio, wall: WALL, canvases: allCanvases, tools });
+const xr = new XRControls({ renderer, rig, camera, palette, world, audio, wall: WALL, tools });
 const refBoard = new RefBoard({ scene, palette, wall: WALL });
 // Vue spectateur sur l'écran du PC pendant une session Link. Dans le navigateur
 // du casque, personne ne voit la page : on n'y dépense rien.
@@ -109,10 +122,14 @@ applyState({ paint: 1, cap: 1, drips: 1, night: 1, wall: 1, spectator: 1 });
 // L'ancien mur est gardé dans l'historique : Annuler le rend intact, y compris
 // la partie que le redimensionnement avait coupée.
 function applySurface(s, W, H) {
+  // les caches du mur gardent leur place dans le monde (mur centré)
+  for (const m of wallCanvas.masks) m.x += (W - WALL.width) / 2;
   surface = s;
+  surface.maskSource = wallCanvas;
   WALL.width = W;
   WALL.height = H;
   world.setWallSize(surface);
+  stencils.changed(wallCanvas);
   world.setWallType(state.wall);
   spray.reset();
   if (state.wallWidth !== W || state.wallHeight !== H) set({ wallWidth: W, wallHeight: H });
@@ -155,7 +172,7 @@ function readWall(w, h) {
   const rt = new THREE.WebGLRenderTarget(w, h, { colorSpace: THREE.SRGBColorSpace });
   const cam = new THREE.OrthographicCamera(-WALL.width / 2, WALL.width / 2, WALL.height, 0, 0.001, 0.1);
   cam.position.set(0, 0, WALL.z + 0.05);
-  const hidden = [world.cursor, world.can].filter(o => o.visible);
+  const hidden = [world.cursor, world.can, stencils.group, ...scraper.meshes.values()].filter(o => o.visible);
   hidden.forEach(o => { o.visible = false; });
   const prev = renderer.getRenderTarget(), xrOn = renderer.xr.enabled;
   renderer.xr.enabled = false;
@@ -231,6 +248,7 @@ async function saveCurrent(manual = false) {
         // devantures peintes de la rue
         extra: Object.fromEntries(await Promise.all(canvases.painted().map(async c => [c.id, await c.surface.exportLayers()]))),
         refs: state.refs,
+        masks: stencils.serialize(),
       });
       // projet enregistré entre-temps sur l'autre appareil : cette version a été gardée à part
       if (rec.id !== id) notify(`Modifié aussi sur l'autre appareil : ta version devient « ${rec.name} »`);
@@ -260,8 +278,10 @@ function nextName() {
 async function newProject() {
   await saveCurrent();
   spray.reset();
+  scraper.reset();
   surface.clear(false);
   canvases.disposeAll();
+  stencils.load({});
   history.reset();
   set({ projectId: null, projectName: nextName() });
   loadedId = null;
@@ -281,6 +301,9 @@ async function openProject(id, message = null) {
   surface.importLayers(p.layers);
   canvases.disposeAll();
   for (const [cid, layers] of Object.entries(p.extra || {})) canvases.byId(cid)?.ensureSurface().importLayers(layers);
+  // projets d'avant les caches : aucun cache, et un fond vide (le raclage révèle le mur)
+  stencils.load(p.masks || {});
+  scraper.reset();
   history.reset();
   set({ projectId: p.id, projectName: p.name, wall: p.wall || state.wall, savedColors: p.savedColors || [], refs: p.refs || [] });
   loadedId = p.id;
@@ -313,9 +336,12 @@ function notify(msg) {
   toast(msg);
   palette.flash(msg);
 }
+actions.notify = notify;
 
 actions.undo = () => {
   spray.reset();
+  scraper.reset();
+  stencils.commit();
   flushAll();
   const rec = history.undo();
   if (!rec) { notify('Rien à annuler'); return; }
@@ -326,6 +352,7 @@ actions.undo = () => {
 // « Tout effacer » vide le mur et les devantures peintes, en un seul geste annulable.
 actions.clear = () => {
   spray.reset();
+  scraper.reset();
   history.begin('effacement');
   surface.clear();
   canvases.clearAll(true);
@@ -334,6 +361,10 @@ actions.clear = () => {
   notify('Tout est effacé (Annuler pour revenir)');
 };
 actions.photo = exportPhoto;
+actions.removeMasks = () => {
+  const n = stencils.removeAll();
+  notify(n ? `${n > 1 ? n + ' caches retirés' : 'Cache retiré'} (Annuler pour les remettre)` : 'Aucun cache posé');
+};
 actions.enterVR = () => enterXR('immersive-vr');
 actions.enterAR = () => enterXR('immersive-ar');
 
@@ -422,9 +453,17 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
-const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall }) : null;
+// Toutes les couches de toutes les surfaces (contrôle d'annulation exacte)
+async function exportAll() {
+  flushAll();
+  const out = { mur: await surface.exportLayers() };
+  for (const c of canvases.painted()) out[c.id] = await c.surface.exportLayers();
+  return out;
+}
+
+const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall, stencils, wallCanvas, exportAll, history }) : null;
 window.__vrpaint = {
-  get surface() { return surface; }, spray, history, canvases,
+  get surface() { return surface; }, spray, history, canvases, stencils, scraper, wallCanvas, exportAll,
   state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator,
 };
 
@@ -445,20 +484,32 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   const presenting = renderer.xr.isPresenting;
   const input = presenting ? xr.update(dt) : desktop.update(dt);
+  // l'outil en main reçoit l'entrée ; les coulures continuent quoi qu'il arrive
+  const step = (h, inp) => {
+    const scr = scraperById(state.tool);
+    const sprayed = spray.update(h, state.tool === 'bombe' ? inp : null);
+    const scraped = scraper.update(h, scr ? inp : null, scr);
+    return sprayed || scraped;
+  };
   let spraying;
   if (test) {
     // test : plusieurs pas de simulation par image (le rendu logiciel est lent)
-    for (let k = 0; k < 40; k++) spraying = spray.update(1 / 60, test.step() || input);
+    for (let k = 0; k < 40; k++) spraying = step(1 / 60, test.step() || input);
   } else {
-    spraying = spray.update(dt, input);
+    spraying = step(dt, input);
   }
   if (spraying || spray.drips.length) markDirty();
   flushAll();
   world.update(dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera, renderer.getPixelRatio());
   audio.setSpray(spray.pressure, spray.cap);
+  audio.setScrape(scraper.pressure, scraper.speed);
   audio.setTraffic(world.traffic.nearest(camera.getWorldPosition(_camPos)));
-  world.updateCursor(spray.hit, spray.cap, state.aim && !!input && !test && (!presenting || (spray.hit && spray.hit.t < 0.9)));
-  world.can.visible = presenting || (!!input && !test);
+  const scr = scraperById(state.tool);
+  if (scr) world.updateCursor(scraper.hit, null, state.aim && !!input && !test && !presenting, [scr.width / 2, 0.0025]);
+  else world.updateCursor(spray.hit, spray.cap, state.aim && !!input && !test && (!presenting || (spray.hit && spray.hit.t < 0.9)));
+  const inHand = presenting || (!!input && !test);
+  world.can.visible = inHand && state.tool === 'bombe';
+  for (const [id, m] of scraper.meshes) m.visible = inHand && id === state.tool;
   world.updateLift(rig);
 
   if (dirty && !saving && !spraying && !spray.drips.length && performance.now() - lastPaint > 4000 && !test) saveCurrent();

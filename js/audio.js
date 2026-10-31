@@ -1,4 +1,5 @@
-// Souffle de la bombe (bruit filtré) et cliquetis de la bille quand on secoue.
+// Souffle de la bombe (bruit filtré), cliquetis de la bille quand on secoue,
+// crissement de la lame qui racle.
 export class SprayAudio {
   constructor() {
     this.ctx = null;
@@ -46,6 +47,32 @@ export class SprayAudio {
     road.connect(low).connect(this.roadGain).connect(ctx.destination);
     road.start(0, 0.7);
     this.roadLevel = 0;
+
+    // lame qui racle : bruit grinçant, plus aigu quand on va vite
+    const scr = ctx.createBufferSource();
+    scr.buffer = buf;
+    scr.loop = true;
+    this.scrapeBand = ctx.createBiquadFilter();
+    this.scrapeBand.type = 'bandpass';
+    this.scrapeBand.frequency.value = 2200;
+    this.scrapeBand.Q.value = 1.4;
+    this.scrapeGain = ctx.createGain();
+    this.scrapeGain.gain.value = 0;
+    scr.connect(this.scrapeBand).connect(this.scrapeGain).connect(ctx.destination);
+    scr.start(0, 1.3);
+    this.scrapeLevel = 0;
+  }
+
+  // pression 0..1 de la lame sur le mur, vitesse (m/s)
+  setScrape(pressure, speed) {
+    if (!this.ctx) return;
+    const v = Math.min(1, speed / 0.3);
+    const target = pressure > 0.02 ? (0.02 + 0.22 * pressure) * (0.15 + 0.85 * v) : 0;
+    if (Math.abs(target - this.scrapeLevel) < 0.004) return;
+    this.scrapeLevel = target;
+    const t = this.ctx.currentTime;
+    this.scrapeGain.gain.setTargetAtTime(target, t, 0.03);
+    this.scrapeBand.frequency.setTargetAtTime(1300 + 2600 * v - 500 * pressure, t, 0.05);
   }
 
   // distance (m) de la voiture en mouvement la plus proche
