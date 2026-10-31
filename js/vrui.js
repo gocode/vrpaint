@@ -105,8 +105,9 @@ export function editorHex(paint) {
   return paint.kind === 'phospho' ? paint.glow : paint.hex;
 }
 
-// Coordonnées logiques du panneau ; le canvas est rendu à 75 %.
-const LW = 1024, LH = 1600, SCALE = 0.75;
+// Coordonnées logiques du panneau ; le canvas est rendu à 100 % (à 75 %, le texte était
+// déjà sous-échantillonné avant même l'image du casque).
+const LW = 1024, LH = 1600, SCALE = 1;
 const PW = 0.2, PH = PW * LH / LW;
 const TABS = [['colors', 'Couleurs'], ['perso', 'Perso'], ['tools', 'Outils'], ['model', 'Modèle'], ['settings', 'Réglages'], ['projects', 'Projets']];
 const FONT = 'system-ui, sans-serif';
@@ -120,7 +121,8 @@ export class VRPalette {
     this.ctx = this.canvas.getContext('2d');
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.anisotropy = 4;
+    // vue en biais (pupitre incliné) : sans filtrage anisotrope fort, le texte bave en hauteur
+    this.texture.anisotropy = 16;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH),
       new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false }));
     // au-dessus de la manette, incliné vers les yeux comme un pupitre
@@ -178,7 +180,7 @@ export class VRPalette {
     c.textBaseline = 'alphabetic';
   }
 
-  _text(str, x, y, size = 30, color = '#9aa0ab', weight = 400, maxW = undefined) {
+  _text(str, x, y, size = 30, color = '#b8bdc7', weight = 400, maxW = undefined) {
     const c = this.ctx;
     c.fillStyle = color;
     c.font = `${weight} ${size}px ${FONT}`;
@@ -365,25 +367,27 @@ export class VRPalette {
   _draw_settings(reg) {
     const buttons = [
       ['undo', 'Annuler'], ['clear', 'Effacer', true], ['night', state.night ? 'Jour' : 'Nuit'],
-      ['drips', 'Coulures ' + (state.drips ? 'oui' : 'non')],
+      ['drips', 'Coulures ' + (state.drips ? 'oui' : 'non')], ['spatter', 'Projections ' + (state.spatter ? 'oui' : 'non')],
       ['aim', 'Viseur ' + (state.aim ? 'oui' : 'non')], ['hand', state.leftHanded ? 'Gaucher' : 'Droitier'],
       ['save', 'Sauver'], ['photo', 'Photo'],
     ];
     buttons.forEach(([id, label, danger], i) => {
-      this._button(reg({ type: 'btn', id, x: 32 + (i % 4) * 244, y: 240 + Math.floor(i / 4) * 116, w: 232, h: 104 }), label, { danger });
+      this._button(reg({ type: 'btn', id, x: 32 + (i % 3) * 325, y: 240 + Math.floor(i / 3) * 116, w: 315, h: 104 }), label, { danger });
     });
-    this._text('Type de mur', 32, 520, 30, '#d7dae0', 600);
+    // la suite descend avec le nombre de rangées de boutons
+    const dy = (Math.ceil(buttons.length / 3) - 2) * 116;
+    this._text('Type de mur', 32, 520 + dy, 30, '#d7dae0', 600);
     const name = WALLS.find(w => w.id === state.wall)?.name || 'Mur';
-    this._button(reg({ type: 'btn', id: 'wallPrev', x: 32, y: 540, w: 140, h: 100 }), '◀', { size: 40 });
-    this._button(reg({ type: 'btn', id: 'wallNext', x: 852, y: 540, w: 140, h: 100 }), '▶', { size: 40 });
+    this._button(reg({ type: 'btn', id: 'wallPrev', x: 32, y: 540 + dy, w: 140, h: 100 }), '◀', { size: 40 });
+    this._button(reg({ type: 'btn', id: 'wallNext', x: 852, y: 540 + dy, w: 140, h: 100 }), '▶', { size: 40 });
     this.ctx.textAlign = 'center';
-    this._text(name, 512, 604, 38, '#f2f2f2', 600);
+    this._text(name, 512, 604 + dy, 38, '#f2f2f2', 600);
     this.ctx.textAlign = 'left';
 
-    this._text('Taille du mur', 32, 700, 30, '#d7dae0', 600);
+    this._text('Taille du mur', 32, 700 + dy, 30, '#d7dae0', 600);
     const rows = [['W', 'Largeur', this.pendW, ' m'], ['H', 'Hauteur', this.pendH, ' m']];
     rows.forEach(([k, label, val, unit], i) => {
-      const y = 720 + i * 120;
+      const y = 720 + dy + i * 120;
       this._button(reg({ type: 'btn', id: 'dec' + k, x: 32, y, w: 140, h: 100 }), '−', { size: 48 });
       this._button(reg({ type: 'btn', id: 'inc' + k, x: 852, y, w: 140, h: 100 }), '+', { size: 48 });
       this.ctx.textAlign = 'center';
@@ -391,9 +395,9 @@ export class VRPalette {
       this.ctx.textAlign = 'left';
     });
     const changed = this.pendW !== state.wallWidth || this.pendH !== state.wallHeight;
-    this._button(reg({ type: 'btn', id: 'applySize', x: 32, y: 970, w: 960, h: 100 }),
+    this._button(reg({ type: 'btn', id: 'applySize', x: 32, y: 970 + dy, w: 960, h: 100 }),
       changed ? 'Appliquer la nouvelle taille' : `Mur actuel : ${state.wallWidth} × ${String(state.wallHeight).replace('.', ',')} m`, { on: changed });
-    this._text('La peinture déjà faite reste à sa place.', 32, 1120, 28);
+    this._text('La peinture déjà faite reste à sa place.', 32, 1120 + dy, 28);
   }
 
   _draw_model(reg) {
@@ -532,6 +536,7 @@ export class VRPalette {
       clear: () => actions.clear(),
       night: () => set({ night: !state.night }),
       drips: () => set({ drips: !state.drips }),
+      spatter: () => set({ spatter: !state.spatter }),
       aim: () => set({ aim: !state.aim }),
       hand: () => set({ leftHanded: !state.leftHanded }),
       save: () => actions.save(),

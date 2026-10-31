@@ -36,6 +36,7 @@ export const state = {
   cap: 'standard',
   capScale: 1,
   drips: true,
+  spatter: true,       // projections de gouttelettes autour du trait
   aim: true,
   night: false,
   wall: 'briques',

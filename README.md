@@ -98,6 +98,10 @@ depuis GitHub Pages ; la diffusion native fait le même travail sans coût pour 
 | Personnaliser la couleur en main | toucher la grande pastille en haut de la palette (onglet **Perso**) |
 | Largeur du jet | glisser le potentiomètre en bas de la palette (30 % à 250 %) |
 | Se déplacer | joystick gauche |
+| Déplacement fin (hauteur comprise) | gâchette latérale (grip) gauche maintenue : la main « attrape » le monde, on le tire |
+| Se replacer face au mur, à 85 cm | clic du joystick gauche |
+| Largeur du jet sans viser la palette | gâchette gauche maintenue + joystick gauche ↑ ↓ (par crans de 5 % ; avec les caches : taille du prochain cache) |
+| Couleur précédente / suivante | gâchette gauche maintenue + joystick gauche ← → (le nom s'affiche en haut de la palette) |
 | Tourner par crans de 30° | joystick droit ← → |
 | Monter / descendre (nacelle) | joystick droit ↑ ↓ (jusqu'à hauteur du mur − 1,2 m) |
 | Viseur on/off · Annuler | A · B |
@@ -125,12 +129,21 @@ Palette à 6 onglets :
 - **Perso** : teinte, finition, Enregistrer, Mes couleurs ;
 - **Outils** : bombe, caches (forme, taille, décollement, tout retirer), couteau, spatule, grattoir ;
 - **Modèle** : choisir la photo de référence, l'afficher à gauche, à droite ou au-dessus de la palette, ou sur un chevalet près du mur, et régler sa taille. Les photos s'ajoutent depuis le panneau du navigateur, avant d'entrer en VR ;
-- **Réglages** : annuler, effacer, nuit, coulures, viseur, main droite/gauche, type et taille du mur ;
+- **Réglages** : annuler, effacer, nuit, coulures, projections, viseur, main droite/gauche, type et taille du mur ;
 - **Projets** : nouveau, enregistrer, ouvrir (les projets du PC, communs au PC et au casque).
 
 Les caps et le potentiomètre de largeur restent visibles en bas, quel que soit l'onglet, comme **Quitter la VR** en haut.
-`node tests/sortie-vr.mjs` vérifie, sur une séance simulée, que ce bouton est présent sur chaque onglet sans rien
-chevaucher, qu'un appui seul ne quitte pas et que la sortie rend bien la page du navigateur.
+`node tests/casque.mjs` vérifie, sur une séance et des manettes simulées :
+- que ce bouton est présent sur chaque onglet, qu'un appui seul ne quitte pas et que la sortie rend bien la page du navigateur ;
+- que sur aucun onglet deux zones de la palette ne se chevauchent ;
+- les commandes de la main gauche ;
+- l'option Projections.
+
+Palette nette : le canvas est rendu à pleine définition (1024 × 1600) avec un filtrage anisotrope ×16, car le pupitre
+est vu en biais. La fovéation fixe est descendue de 0,6 à 0,3 : la palette, tenue bas devant soi, tombait dans le bord
+de l'image, calculé en basse définition. Côté casque, la zone nette des lentilles du Quest 2 est petite. Il vaut mieux
+baisser la tête vers la palette plutôt que les yeux seuls, et régler l'écart des lentilles (58, 63 ou 68 mm) et la
+position du casque sur le visage.
 
 ### PC
 Clic gauche : peindre (Maj : pression légère) · molette : distance au mur · Maj + molette : angle du flat cap ·
@@ -194,6 +207,8 @@ node tests/tactile.mjs
 
   Le potentiomètre élargit ou resserre le cap choisi, et le débit suit.
 - **Grain** : nuage fin gaussien + gouttelettes + halo d'overspray ; à mi-pression, le jet crachote de grosses gouttes.
+  Option **Projections** (Réglages, et panneau du navigateur) : décochée, le trait reste propre. Il n'y a plus de halo, ni de
+  crachotement à mi-gâchette, ni de gouttelette au-delà de 1,6 σ du centre. Le grain du trait reste.
 - **Coulures** : une carte d'épaisseur de peinture fraîche sèche en ~4 s. Trop de peinture au même endroit
   (bombe immobile ou trop près) fait partir une coulure qui descend, ralentit et finit en perle.
 - **Peintures** :

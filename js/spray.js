@@ -78,6 +78,7 @@ export class Spray {
     this.paint = null;
     this.cap = CAPS[1];
     this.dripsEnabled = true;
+    this.spatter = true;      // gouttelettes hors du trait (overspray, jet qui crachote)
     this.onStrokeStart = null;
     this.hit = null;
     this.pressure = 0;
@@ -190,19 +191,22 @@ export class Spray {
     S.push(u, v, dose, 0, ax * 3, ay * 3, bx * 3, by * 3, paint, s.x, s.y, s.t);
 
     // Gouttelettes : grain de la bombe, plus un halo d'overspray.
-    let nd = Math.floor(DROP_RATE * cap.flow ** 0.8 * pf * eff * dt + Math.random());
-    const spit = 1 + (1 - p) * 1.6;           // gâchette à moitié : jet qui crachote
+    // Sans projections : le grain reste dans le trait, sans halo ni crachotement.
+    const spatter = this.spatter;
+    let nd = Math.floor(DROP_RATE * cap.flow ** 0.8 * pf * eff * dt * (spatter ? 1 : 0.72) + Math.random());   // 0,72 : le grain sans les 28 % du halo
+    const spit = spatter ? 1 + (1 - p) * 1.6 : 1;   // gâchette à moitié : jet qui crachote
+    const clip = g => spatter ? g : Math.max(-1.6, Math.min(1.6, g));
     while (nd-- > 0) {
-      const far = Math.random() < 0.28;
+      const far = spatter && Math.random() < 0.28;
       const k = far ? 2.1 : 1.1;
-      const g1 = gauss() * k, g2 = gauss() * k;
+      const g1 = clip(gauss() * k), g2 = clip(gauss() * k);
       let r = (0.0005 + Math.random() * Math.random() * 0.0016) * spit;
       let a = (far ? 0.35 : 0.7) * (0.5 + Math.random() * 0.5);
       if (r < minR) { a *= (r / minR) ** 2; r = minR; }
       S.push(u + (g1 * ax + g2 * bx) / W, v + (g1 * ay + g2 * by) / H, a, 1,
         s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint, s.x, s.y, s.t);
     }
-    if (p < 0.45 && Math.random() < dt * 10 * (0.45 - p)) {
+    if (spatter && p < 0.45 && Math.random() < dt * 10 * (0.45 - p)) {
       const r = 0.0015 + Math.random() * 0.002, g1 = gauss(), g2 = gauss();
       S.push(u + (g1 * ax + g2 * bx) / W, v + (g1 * ay + g2 * by) / H, 0.9, 1,
         s.rx * r, s.ry * r, s.ux * r, s.uy * r, paint, s.x, s.y, s.t);

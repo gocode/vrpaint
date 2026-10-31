@@ -45,7 +45,10 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
-renderer.xr.setFoveation(0.6);if (!renderer.extensions.has('EXT_color_buffer_float') && !renderer.extensions.has('EXT_color_buffer_half_float')) {
+// Fovéation fixe : le bord de l'image est calculé en plus basse définition. La palette,
+// tenue bas devant soi, tombe dans ce bord : à 0,6 son texte devenait flou.
+renderer.xr.setFoveation(0.3);
+if (!renderer.extensions.has('EXT_color_buffer_float') && !renderer.extensions.has('EXT_color_buffer_half_float')) {
   console.warn('Render targets flottants non supportés : la peinture risque de ne pas s\'afficher.');
 }
 
@@ -105,6 +108,7 @@ function applyState(patch) {
   if ('paint' in patch) { spray.paint = state.paint; world.setCanPaint(state.paint); }
   if ('cap' in patch || 'capScale' in patch) spray.cap = currentCap();
   if ('drips' in patch) spray.dripsEnabled = state.drips;
+  if ('spatter' in patch) spray.spatter = state.spatter;
   if ('night' in patch) { world.setNight(state.night); world.setCanPaint(state.paint); }
   if ('wall' in patch) world.setWallType(state.wall);
   if ('wallWidth' in patch || 'wallHeight' in patch) resizeWall(state.wallWidth, state.wallHeight);
@@ -115,7 +119,7 @@ function applyState(patch) {
   }
 }
 subscribe(applyState);
-applyState({ paint: 1, cap: 1, drips: 1, night: 1, wall: 1, spectator: 1 });
+applyState({ paint: 1, cap: 1, drips: 1, spatter: 1, night: 1, wall: 1, spectator: 1 });
 
 // --- Taille du mur ------------------------------------------------------------
 // La peinture est reprise telle quelle dans le monde : mur centré, pied fixe.
@@ -500,7 +504,7 @@ async function exportAll() {
 const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall, stencils, wallCanvas, exportAll, history }) : null;
 window.__vrpaint = {
   get surface() { return surface; }, spray, history, canvases, stencils, scraper, wallCanvas, exportAll,
-  state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator,
+  state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator, xr,
 };
 
 // Hors casque, pas d'image recalculée quand l'écran n'a pas à changer.

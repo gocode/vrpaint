@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { state, set, subscribe, actions, setTool } from './state.js';
+import { state, set, subscribe, actions, setTool, CAP_SCALE } from './state.js';
 import { scraperById } from './scraper.js';
+import { PAINTS } from './palette.js';
+import { MASK_SIZE } from './stencils.js';
 
 const Y = new THREE.Vector3(0, 1, 0);
 const _q = new THREE.Quaternion();
@@ -17,7 +19,10 @@ const _f = new THREE.Vector3();
 //     visant = taille ; A = retirer le cache visé
 //   racloirs : la lame racle quand elle touche le mur ; l'enfoncer (ou la
 //     gâchette) appuie plus fort ; vibrations selon la pression et la vitesse
-//   main de la palette : joystick = se déplacer, X = masquer la palette, Y = jour/nuit
+//   main de la palette : joystick = se déplacer, clic du joystick = se replacer face au mur,
+//     gâchette latérale maintenue = attraper le monde et le tirer (déplacement fin, hauteur comprise),
+//     gâchette maintenue + joystick : ↑↓ = largeur du jet (taille du cache avec les caches),
+//     ←→ = couleur précédente / suivante ; X = masquer la palette, Y = jour/nuit
 export class XRControls {
   constructor({ renderer, rig, camera, palette, world, audio, wall, tools }) {
     Object.assign(this, { renderer, rig, camera, palette, world, audio, wall, tools });
@@ -112,10 +117,71 @@ export class XRControls {
     _f.normalize();
     _v.crossVectors(_f, Y);
     this.rig.position.addScaledVector(_f, -y * 1.4 * dt).addScaledVector(_v, x * 1.4 * dt);
-    // ne pas traverser le mur
+    this._keepOffWall();
+  }
+
+  // pas de traversée du mur : la tête reste à 18 cm devant lui
+  _keepOffWall() {
+    this.rig.updateMatrixWorld(true);
     this.camera.getWorldPosition(_h);
     const limit = this.wall.z + 0.18;
     if (_h.z < limit && _h.x > -this.wall.width / 2 - 0.3 && _h.x < this.wall.width / 2 + 0.3) this.rig.position.z += limit - _h.z;
+  }
+
+  // Face au mur, à 85 cm, la tête en face du mur (comme à l'entrée en VR) ; la hauteur ne change pas
+  recenter() {
+    this.camera.getWorldDirection(_f);
+    this.turn(Math.PI - Math.atan2(_f.x, _f.z));
+    this.rig.updateMatrixWorld(true);
+    this.camera.getWorldPosition(_h);
+    const half = this.wall.width / 2;
+    this.rig.position.x += THREE.MathUtils.clamp(_h.x, -half, half) - _h.x;
+    this.rig.position.z += this.wall.z + 0.85 - _h.z;
+  }
+
+  // Gâchette latérale de la main de la palette : la main « tient » le monde là où elle l'a pris
+  _grabWorld(pal) {
+    const held = !!pal.src.gamepad.buttons[1]?.pressed;
+    if (!held) { pal.grab = null; return; }
+    this.rig.updateMatrixWorld(true);
+    pal.grip.getWorldPosition(_v);
+    if (!pal.grab) { pal.grab = _v.clone(); this.pulse(pal.src.gamepad, 0.25, 20); return; }
+    const rig = this.rig;
+    rig.position.add(_h.subVectors(pal.grab, _v));
+    rig.position.y = THREE.MathUtils.clamp(rig.position.y, 0, Math.max(1, this.wall.height - 1.2));
+    this._keepOffWall();
+  }
+
+  // Gâchette de la main de la palette maintenue : le joystick règle l'outil au lieu de déplacer
+  _tune(pal, x, y, dt) {
+    const pg = pal.src.gamepad;
+    if (pal.fineTool !== state.tool) { pal.fine = undefined; pal.fineTool = state.tool; }
+    if (Math.abs(y) > 0.2 && Math.abs(x) < 0.5) {
+      const k = Math.exp(-y * 1.1 * dt);
+      // par crans (la palette, et sa texture, n'est redessinée qu'à chaque cran) ;
+      // la valeur fine est gardée dans la main entre deux crans
+      if (state.tool === 'cache') {
+        pal.fine = THREE.MathUtils.clamp((pal.fine ?? state.maskSize) * k, ...MASK_SIZE);
+        const v = Math.round(1.05 ** Math.round(Math.log(pal.fine) / Math.log(1.05)) * 1000) / 1000;
+        if (v !== state.maskSize) {
+          set({ maskSize: v });
+          this.palette.flash(`Prochain cache : ${Math.round(v * 200)} cm`);
+          this.pulse(pg, 0.08, 10);
+        }
+      } else {
+        pal.fine = THREE.MathUtils.clamp((pal.fine ?? state.capScale) * k, ...CAP_SCALE);
+        const v = Math.round(pal.fine * 20) / 20;
+        if (v !== state.capScale) { set({ capScale: v }); this.pulse(pg, 0.08, 10); }
+      }
+    } else pal.fine = undefined;
+    if (Math.abs(x) > 0.7 && !pal.tuneSnap) {
+      pal.tuneSnap = true;
+      const i = PAINTS.findIndex(p => p.id === state.paint.id);
+      const n = PAINTS.length, next = PAINTS[((i < 0 ? 0 : i + Math.sign(x)) + n) % n];
+      set({ paint: next });
+      this.palette.flash(`${next.name} · ${next.group}`);
+      this.pulse(pg, 0.2, 15);
+    } else if (Math.abs(x) < 0.3) pal.tuneSnap = false;
   }
 
   update(dt) {
@@ -123,9 +189,16 @@ export class XRControls {
     rig.updateMatrixWorld(true);
 
     if (pal) {
-      const ax = pal.src.gamepad.axes;
+      const pg = pal.src.gamepad, ax = pg.axes;
       const x = ax[2] || 0, y = ax[3] || 0;
-      if (Math.hypot(x, y) > 0.15) this.move(x, y, dt);
+      const tuning = (pg.buttons[0]?.value || 0) > 0.5;
+      if (tuning) this._tune(pal, x, y, dt);
+      else {
+        pal.tuneSnap = false;
+        if (Math.hypot(x, y) > 0.15) this.move(x, y, dt);
+      }
+      this._grabWorld(pal);
+      if (this.edge(pal, 3)) { this.recenter(); this.pulse(pg, 0.3, 25); }
       if (this.edge(pal, 4)) this.palette.mesh.visible = !this.palette.mesh.visible;
       if (this.edge(pal, 5)) set({ night: !state.night });
     }

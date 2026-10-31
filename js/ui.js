@@ -101,6 +101,7 @@ export function buildUI() {
       <button type="button" id="apply-size" class="wide" hidden>Appliquer la nouvelle taille</button>
       <label class="check"><input type="checkbox" id="night"> Nuit (phospho)</label>
       <label class="check"><input type="checkbox" id="drips"> Coulures</label>
+      <label class="check" title="Gouttelettes autour du trait et jet qui crachote à mi-gâchette ; décoché : trait propre"><input type="checkbox" id="spatter"> Projections</label>
       <label class="check"><input type="checkbox" id="aim"> Viseur</label>
     </section>
     <section>
@@ -216,7 +217,7 @@ export function buildUI() {
     if (file) actions.openProjectFile(file);
   });
   $('#project-name').addEventListener('change', e => actions.renameProject(e.target.value.trim() || 'Sans titre'));
-  for (const id of ['night', 'drips', 'aim']) $('#' + id).addEventListener('change', e => set({ [id]: e.target.checked }));
+  for (const id of ['night', 'drips', 'spatter', 'aim']) $('#' + id).addEventListener('change', e => set({ [id]: e.target.checked }));
   $('#ref-file').addEventListener('change', async e => {
     const files = [...e.target.files];
     e.target.value = '';
@@ -318,6 +319,7 @@ export function buildUI() {
     bar.querySelectorAll('[data-spec]').forEach(b => b.classList.toggle('on', b.dataset.spec === state.spectator));
     $('#night').checked = state.night;
     $('#drips').checked = state.drips;
+    $('#spatter').checked = state.spatter;
     $('#aim').checked = state.aim;
     $('#touch-drag').value = state.touchDrag;
     $('#touch-pinch').value = state.touchPinch;
