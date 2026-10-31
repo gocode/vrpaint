@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VRpaint — graffiti virtuel</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<aside id="panel" aria-label="Outils"></aside>
+<button id="panel-toggle" type="button" aria-label="Afficher les outils">☰</button>
+<div id="hud"></div>
+<div id="refview" hidden><img alt="Modèle"></div>
+<div id="toast" role="status"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
