@@ -1,15 +1,25 @@
 import * as THREE from 'three';
-import { state, set, actions } from './state.js';
+import { state, set, actions, setTool } from './state.js';
 import { CAPS } from './spray.js';
+import { SCRAPERS, scraperById } from './scraper.js';
+import { MASK_SIZE } from './stencils.js';
 
 const _f = new THREE.Vector3();
 const _r = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _m4 = new THREE.Matrix4();
+const DEG = Math.PI / 180;
+const ATTACK = 35 * DEG;   // angle de la lame sur le mur en mode souris
 
 // Mode souris / écran tactile. La bombe est tenue perpendiculaire au mur, à
-// state.distance de la surface visée par le pointeur.
+// state.distance de la surface visée par le pointeur. Avec les caches, un clic
+// pose (ou attrape) un cache ; avec un racloir, on racle en glissant.
 export class DesktopControls {
-  constructor({ camera, rig, canvas, world, audio, wall, canvases }) {
-    Object.assign(this, { camera, rig, canvas, world, audio, wall, canvases });
+  constructor({ camera, rig, canvas, world, audio, wall, canvases, tools }) {
+    Object.assign(this, { camera, rig, canvas, world, audio, wall, canvases, tools });
+    this.pressEdge = false;
+    this.grab = null;
+    this.hoverMask = null;
     this.ndc = new THREE.Vector2();
     this.hasPointer = false;
     this.down = false;
@@ -26,7 +36,7 @@ export class DesktopControls {
       this.audio.ensure();
       this._pointer(e);
       canvas.setPointerCapture(e.pointerId);
-      if (e.button === 0) this.down = true;
+      if (e.button === 0) { this.down = true; this.pressEdge = true; }
       else if (e.button === 2 || e.button === 1) this.look = { x: e.clientX, y: e.clientY };
     });
     const up = e => {
@@ -39,6 +49,11 @@ export class DesktopControls {
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
       const d = e.deltaY || e.deltaX;
+      if (state.tool === 'cache') { this._wheelMask(d, e.shiftKey); return; }
+      if (scraperById(state.tool) && !e.shiftKey) {
+        set({ pressure: THREE.MathUtils.clamp(Math.round(state.pressure * 20 - Math.sign(d)) / 20, 0.1, 1) });
+        return;
+      }
       if (e.shiftKey) {
         set({ angle: THREE.MathUtils.clamp(Math.round(state.angle - Math.sign(d) * 5), -90, 90) });
       } else {
@@ -58,6 +73,16 @@ export class DesktopControls {
       else if (k === 'v') set({ aim: !state.aim });
       else if (k === 'c') set({ drips: !state.drips });
       else if (k === 'x') { this.audio.ensure(); this.audio.rattle(); }
+      else if (k === 'b') setTool('bombe');
+      else if (k === 'm') setTool('cache');
+      else if (k === 'r') {
+        const i = SCRAPERS.findIndex(t => t.id === state.tool);
+        setTool(SCRAPERS[(i + 1) % SCRAPERS.length].id);
+      }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && this.hoverMask) {
+        this.tools.stencils.remove(this.hoverMask.canvas, this.hoverMask.mask);
+        this.hoverMask = null;
+      }
       this.keys.add(e.code);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     });
@@ -87,7 +112,7 @@ export class DesktopControls {
       _f.subVectors(p, f.corner);
       const x = _f.dot(f.ex), y = _f.dot(f.ey);
       if (x < 0 || y < 0 || x > c.width || y > c.height) continue;
-      best = { t, point: p, frame: f };
+      best = { t, point: p, frame: f, canvas: c, x, y };
     }
     return best;
   }
@@ -120,23 +145,91 @@ export class DesktopControls {
     rig.position.z = THREE.MathUtils.clamp(rig.position.z, this.wall.z + 0.3, this.wall.z + 14);
     rig.position.x = THREE.MathUtils.clamp(rig.position.x, -this.wall.width / 2 - 10, this.wall.width / 2 + 10);
 
-    if (!this.hasPointer) return null;
-    rig.updateMatrixWorld(true);
-    this.raycaster.setFromCamera(this.ndc, this.camera);
-    const hit = this.pick(this.raycaster.ray);
+    const press = this.pressEdge;
+    this.pressEdge = false;
+    let hit = null;
+    if (this.hasPointer) {
+      rig.updateMatrixWorld(true);
+      this.raycaster.setFromCamera(this.ndc, this.camera);
+      hit = this.pick(this.raycaster.ray);
+    }
+    if (state.tool === 'cache') { this._maskTool(hit, press); return null; }
+    this._maskTool(null, false);
     if (!hit) return null;
     const f = hit.frame, inp = this.input;
-    const a = state.angle * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    const a = state.angle * DEG, ca = Math.cos(a), sa = Math.sin(a);
     inp.origin.copy(hit.point).addScaledVector(f.n, state.distance);
     inp.dir.copy(f.n).negate();
     inp.right.copy(f.ex).multiplyScalar(ca).addScaledVector(f.ey, sa);
     inp.up.copy(f.ey).multiplyScalar(ca).addScaledVector(f.ex, -sa);
     inp.pressure = this.down ? (this.shift ? 0.35 : state.pressure) : 0;
 
+    const tool = scraperById(state.tool);
+    if (tool) {
+      // racloir : lame couchée à 35° sur le mur, fil sur le point visé, manche vers le haut
+      inp.attack = ATTACK;
+      inp.origin.copy(hit.point).addScaledVector(f.n, 0.05);
+      const mesh = this.tools.scraper.meshes.get(tool.id);
+      _d.crossVectors(f.n, inp.right).negate();
+      _f.copy(f.n).multiplyScalar(-Math.sin(ATTACK)).addScaledVector(_d, Math.cos(ATTACK));   // vers la pointe
+      _r.copy(_f).negate().cross(inp.right);
+      _m4.makeBasis(inp.right, _r, _f.clone().negate());
+      mesh.quaternion.setFromRotationMatrix(_m4);
+      mesh.position.copy(hit.point).addScaledVector(_f, -tool.reach).addScaledVector(f.n, 0.002);
+      return inp;
+    }
+    inp.attack = undefined;
+
     // bombe affichée à sa position réelle, buse vers le mur
     const can = this.world.can;
     can.position.copy(inp.origin);
     can.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(inp.right, inp.up, f.n));
     return inp;
+  }
+
+  // Caches : clic sur un cache = l'attraper et le glisser ; clic ailleurs =
+  // en poser un (forme et taille choisies), qu'on peut placer avant de lâcher.
+  _maskTool(hit, press) {
+    const S = this.tools.stencils;
+    if (this.grab) {
+      const g = this.grab;
+      if (!this.down || state.tool !== 'cache') { S.commit(); this.grab = null; }
+      else if (hit && hit.canvas === g.canvas) S.move(g.canvas, g.mask, hit.x + g.dx, hit.y + g.dy);
+      S.showGhost(null);
+      return;
+    }
+    const over = hit ? S.pick(hit.canvas, hit.x, hit.y) : null;
+    S.setHover(over);
+    this.hoverMask = over ? { canvas: hit.canvas, mask: over } : null;
+    if (press && hit) {
+      if (over) {
+        S.begin('déplacement du cache', over);
+        this.grab = { canvas: hit.canvas, mask: over, dx: over.x - hit.x, dy: over.y - hit.y };
+      } else {
+        const m = S.add(hit.canvas, this._spec(hit));
+        if (m) this.grab = { canvas: hit.canvas, mask: m, dx: 0, dy: 0 };
+        else actions.notify?.('16 caches au plus par surface');
+      }
+      S.showGhost(null);
+      return;
+    }
+    S.showGhost(!over && hit ? hit.canvas : null, hit && this._spec(hit));
+  }
+
+  _spec(hit) {
+    return { shape: state.maskShape, x: hit.x, y: hit.y, r: state.maskSize, rot: state.angle * DEG, lift: state.maskLift };
+  }
+
+  // Molette sur un cache : taille (Maj : rotation) ; ailleurs : réglage du prochain cache.
+  _wheelMask(d, shift) {
+    const S = this.tools.stencils, h = this.hoverMask || (this.grab && { canvas: this.grab.canvas, mask: this.grab.mask });
+    if (h) {
+      if (shift) S.rotate(h.canvas, h.mask, -Math.sign(d) * 5 * DEG);
+      else S.resize(h.canvas, h.mask, Math.exp(-d * 0.0012));
+    } else if (shift) {
+      set({ angle: THREE.MathUtils.clamp(Math.round(state.angle - Math.sign(d) * 5), -90, 90) });
+    } else {
+      set({ maskSize: THREE.MathUtils.clamp(+(state.maskSize * Math.exp(-d * 0.0012)).toFixed(3), ...MASK_SIZE) });
+    }
   }
 }

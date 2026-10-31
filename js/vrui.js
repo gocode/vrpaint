@@ -4,8 +4,47 @@ import { CAPS, strokeWidthCm } from './spray.js';
 import { REF_SIDES, refBitmap } from './refs.js';
 import {
   state, set, subscribe, actions, WALLS, WALL_LIMITS, CAP_SCALE, currentCap,
-  setCustom, savedPaints, saveCurrentColor, removeSavedColor,
+  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool,
 } from './state.js';
+import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon, shapeOutline } from './stencils.js';
+import { scraperById } from './scraper.js';
+
+// Icône d'outil : bombe, feuille de pochoir, lame de racloir.
+export function drawToolIcon(ctx, id, x, y, w, h, color = '#e8e8e8') {
+  const cx = x + w / 2, cy = y + h / 2, u = Math.min(w, h) / 10;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  if (id === 'bombe') {
+    ctx.beginPath(); ctx.roundRect(cx - 1.6 * u, cy - 2.6 * u, 3.2 * u, 6 * u, u * 0.6); ctx.fill();
+    ctx.fillRect(cx - 0.8 * u, cy - 3.8 * u, 1.6 * u, 1 * u);
+  } else if (id === 'cache') {
+    // feuille ajourée d'une étoile
+    ctx.beginPath();
+    ctx.rect(cx - 3.6 * u, cy - 3.6 * u, 7.2 * u, 7.2 * u);
+    shapeOutline('etoile', 2.8 * u)[0].forEach(([px, py], i) => (i ? ctx.lineTo(cx + px, cy - py) : ctx.moveTo(cx + px, cy - py)));
+    ctx.closePath();
+    ctx.globalAlpha = 0.8;
+    ctx.fill('evenodd');
+  } else {
+    const t = scraperById(id);
+    const bw = Math.min(4.2, t.width / 0.08 * 4.2) * u;
+    ctx.lineWidth = u * 0.8;
+    ctx.beginPath(); ctx.moveTo(cx, cy + 0.6 * u); ctx.lineTo(cx, cy + 4.2 * u); ctx.stroke();
+    ctx.beginPath();
+    if (id === 'couteau') {
+      ctx.moveTo(cx - bw, cy - 3.6 * u); ctx.lineTo(cx + bw, cy - 3.6 * u);
+      ctx.quadraticCurveTo(cx + bw, cy, cx + 0.3 * u, cy + 0.8 * u); ctx.lineTo(cx - 0.3 * u, cy + 0.8 * u);
+      ctx.quadraticCurveTo(cx - bw, cy, cx - bw, cy - 3.6 * u);
+    } else {
+      ctx.moveTo(cx - bw, cy - 3.6 * u); ctx.lineTo(cx + bw, cy - 3.6 * u);
+      ctx.lineTo(cx + bw * 0.7, cy + 0.8 * u); ctx.lineTo(cx - bw * 0.7, cy + 0.8 * u);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
 
 // Icône d'un cap : empreinte de pulvérisation simulée.
 export function drawCapIcon(ctx, cap, x, y, w, h, color = '#fff') {
@@ -69,7 +108,7 @@ export function editorHex(paint) {
 // Coordonnées logiques du panneau ; le canvas est rendu à 75 %.
 const LW = 1024, LH = 1600, SCALE = 0.75;
 const PW = 0.2, PH = PW * LH / LW;
-const TABS = [['colors', 'Couleurs'], ['perso', 'Perso'], ['model', 'Modèle'], ['settings', 'Réglages'], ['projects', 'Projets']];
+const TABS = [['colors', 'Couleurs'], ['perso', 'Perso'], ['tools', 'Outils'], ['model', 'Modèle'], ['settings', 'Réglages'], ['projects', 'Projets']];
 const FONT = 'system-ui, sans-serif';
 
 // Palette tenue dans la main libre en VR, pointée avec la bombe.
@@ -166,7 +205,7 @@ export class VRPalette {
     this._text(msg, 170, 114, 30);
 
     TABS.forEach(([id, label], i) => {
-      this._button(reg({ type: 'tab', id, x: 32 + i * 194, y: 146, w: 186, h: 70 }), label, { on: this.tab === id, size: 28 });
+      this._button(reg({ type: 'tab', id, x: 32 + i * 161, y: 146, w: 153, h: 70 }), label, { on: this.tab === id, size: 26 });
     });
 
     this['_draw_' + this.tab](reg);
@@ -209,6 +248,67 @@ export class VRPalette {
         c.beginPath(); c.arc(r.x + 60, r.y + 65, 56, 0, Math.PI * 2); c.stroke();
       }
     });
+  }
+
+  _draw_tools(reg) {
+    const c = this.ctx;
+    this._text('Outil en main', 32, 270, 30, '#d7dae0', 600);
+    TOOLS.forEach((t, i) => {
+      const r = reg({ type: 'tool', id: t.id, x: 32 + i * 194, y: 290, w: 186, h: 150 });
+      const on = t.id === state.tool;
+      c.fillStyle = on ? '#3b4252' : '#1e2027';
+      c.beginPath(); c.roundRect(r.x, r.y, r.w, r.h, 18); c.fill();
+      if (on) { c.strokeStyle = '#fff'; c.lineWidth = 4; c.stroke(); }
+      drawToolIcon(c, t.id, r.x, r.y + 6, r.w, r.h - 50, '#e8e8e8');
+      c.fillStyle = '#d7dae0';
+      c.font = `600 26px ${FONT}`;
+      c.textAlign = 'center';
+      c.fillText(t.name, r.x + r.w / 2, r.y + r.h - 14);
+      c.textAlign = 'left';
+    });
+    const help = lines => lines.forEach((l, i) => this._text(l, 32, 1010 + i * 42, 28));
+    if (state.tool === 'cache') {
+      this._text('Forme', 32, 490, 30, '#d7dae0', 600);
+      SHAPES.forEach((sh, i) => {
+        const r = reg({ type: 'shape', id: sh.id, x: 32 + i * 161, y: 510, w: 153, h: 130 });
+        const on = sh.id === state.maskShape;
+        c.fillStyle = on ? '#3b4252' : '#1e2027';
+        c.beginPath(); c.roundRect(r.x, r.y, r.w, r.h, 18); c.fill();
+        if (on) { c.strokeStyle = '#fff'; c.lineWidth = 4; c.stroke(); }
+        drawShapeIcon(c, sh.id, r.x, r.y + 4, r.w, r.h - 40, '#9cc8e8');
+        c.fillStyle = '#d7dae0';
+        c.font = `600 24px ${FONT}`;
+        c.textAlign = 'center';
+        c.fillText(sh.name, r.x + r.w / 2, r.y + r.h - 12);
+        c.textAlign = 'left';
+      });
+      const lift = Math.round(state.maskLift * 1000);
+      const rows = [
+        ['mask', `Taille : ${Math.round(state.maskSize * 200)} cm`],
+        ['lift', `Décollement : ${lift} mm${lift <= 1 ? ' (net)' : lift >= 10 ? ' (flou)' : ''}`],
+      ];
+      rows.forEach(([k, label], i) => {
+        const y = 660 + i * 115;
+        this._button(reg({ type: 'btn', id: k + 'Less', x: 32, y, w: 140, h: 100 }), '−', { size: 48 });
+        this._button(reg({ type: 'btn', id: k + 'More', x: 852, y, w: 140, h: 100 }), '+', { size: 48 });
+        c.textAlign = 'center';
+        this._text(label, 512, y + 62, 36, '#f2f2f2', 600);
+        c.textAlign = 'left';
+      });
+      this._button(reg({ type: 'btn', id: 'removeMasks', x: 32, y: 890, w: 960, h: 90 }), 'Retirer tous les caches', { danger: true });
+      help(['Gâchette sur le mur : poser un cache, glisser pour le placer.',
+        'Gâchette sur un cache : le déplacer ; tourner le poignet : rotation.',
+        'Joystick ↑↓ en visant un cache : taille · A : le retirer.',
+        'Les caches se superposent ; un cache décollé donne un bord flou.']);
+    } else if (scraperById(state.tool)) {
+      help(['Approche la lame du mur : elle racle au contact.',
+        'Enfonce-la (ou presse la gâchette) pour appuyer plus fort.',
+        'Le fil de la lame suit le poignet ; tirer en travers racle,',
+        'glisser dans son axe ne fait rien. Légère : retire la dernière',
+        'couche. Forte : jusqu\'au mur, avec des éclats et des stries.']);
+    } else {
+      help(['Gâchette latérale (bombe) : passer au dernier outil et revenir.']);
+    }
   }
 
   _draw_perso(reg) {
@@ -401,6 +501,8 @@ export class VRPalette {
       case 'tab': this.tab = r.id; this.hover = null; this.highlight.visible = false; return this.draw();
       case 'paint': return set({ paint: r.paint });
       case 'cap': return set({ cap: r.cap.id, capScale: 1 });
+      case 'tool': return setTool(r.id);
+      case 'shape': return set({ maskShape: r.id });
       case 'finish': this.finish = r.id; return setCustom(hsvToHex(this.h, this.s, this.v), r.id);
       case 'saveColor': saveCurrentColor(); return this.flash('Couleur enregistrée dans Mes couleurs');
       case 'removeColor': return removeSavedColor(+state.paint.id.slice(5));
@@ -433,6 +535,11 @@ export class VRPalette {
       decH: () => { this.pendH = clamp(this.pendH - hStep, hMin, hMax); this.draw(); },
       incH: () => { this.pendH = clamp(this.pendH + hStep, hMin, hMax); this.draw(); },
       applySize: () => set({ wallWidth: this.pendW, wallHeight: this.pendH }),
+      maskLess: () => set({ maskSize: Math.max(MASK_SIZE[0], Math.round(state.maskSize * 0.8 * 200) / 200) }),
+      maskMore: () => set({ maskSize: Math.min(MASK_SIZE[1], Math.round(state.maskSize * 1.25 * 200) / 200) }),
+      liftLess: () => set({ maskLift: Math.max(MASK_LIFT[0], Math.round(state.maskLift * 1000 - (state.maskLift > 0.005 ? 2 : 1)) / 1000) }),
+      liftMore: () => set({ maskLift: Math.min(MASK_LIFT[1], Math.round(state.maskLift * 1000 + (state.maskLift >= 0.005 ? 2 : 1)) / 1000) }),
+      removeMasks: () => actions.removeMasks(),
       refShow: () => set({ refShow: !state.refShow }),
       refEasel: () => set({ refEasel: !state.refEasel, refShow: true }),
       refSmaller: () => set({ refScale: Math.max(0.5, Math.round(((state.refScale || 1) - 0.25) * 4) / 4) }),

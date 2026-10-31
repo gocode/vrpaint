@@ -1,5 +1,6 @@
 import { PAINTS, paintById, customPaint, baseHex, finishOf } from './palette.js';
 import { CAPS, tuneCap } from './spray.js';
+import { SCRAPERS } from './scraper.js';
 
 export const WALLS = [
   { id: 'briques', name: 'Briques' },
@@ -20,6 +21,13 @@ export const WALL_LIMITS = { width: [3, 16, 1], height: [2, 6, 0.5] };
 // Potentiomètre de largeur du jet : multiplicateur de l'angle du cap
 export const CAP_SCALE = [0.3, 2.5];
 export const MAX_SAVED_COLORS = 16;
+
+// Outils en main : la bombe, les caches, les racloirs
+export const TOOLS = [
+  { id: 'bombe', name: 'Bombe', hint: 'peindre (touche B)' },
+  { id: 'cache', name: 'Caches', hint: 'poser, déplacer, tourner les pochoirs (touche M)' },
+  ...SCRAPERS.map(t => ({ id: t.id, name: t.name, hint: t.hint + ' (touche R)' })),
+];
 
 export const state = {
   paint: paintById('p13'),   // Rouge
@@ -45,6 +53,11 @@ export const state = {
   pressure: 1,     // souris : pression de la gâchette
   angle: 0,        // souris : rotation du flat cap (degrés)
   leftHanded: false,
+  tool: 'bombe',
+  lastTool: 'cache',   // outil repris par la gâchette latérale (VR)
+  maskShape: 'rond',
+  maskSize: 0.15,      // demi-taille du prochain cache (m)
+  maskLift: 0.002,     // décollement du prochain cache (m)
 };
 
 const PREFS_KEY = 'vrpaint.prefs';
@@ -87,6 +100,12 @@ export function capById(id) {
 // Cap courant, ajusté par le potentiomètre de largeur
 export function currentCap() {
   return tuneCap(capById(state.cap), state.capScale);
+}
+
+// Change d'outil en retenant le dernier outil autre que la bombe.
+export function setTool(id) {
+  if (!TOOLS.some(t => t.id === id)) return;
+  set(id === 'bombe' ? { tool: id } : { tool: id, lastTool: id });
 }
 
 export function setCustom(hex, finish = state.customFinish) {

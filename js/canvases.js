@@ -14,12 +14,15 @@ export class OverlayCanvas {
     this.height = height;
     this.surface = null;
     this.mesh = null;
+    this.masks = [];       // caches posés sur cette devanture (stencils.js)
+    this.maskVersion = 0;
   }
 
   ensureSurface() {
     if (this.surface) return this.surface;
     const m = this.manager;
     this.surface = new PaintSurface(m.renderer, { width: this.width, height: this.height, history: m.history, ...m.resolution(this.width, this.height) });
+    this.surface.maskSource = this;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(this.width, this.height), overlayMaterial(this.surface, m.glowK));
     const f = this.frame;
     const c = f.corner.clone().addScaledVector(f.ex, this.width / 2).addScaledVector(f.ey, this.height / 2).addScaledVector(f.n, 0.004);
