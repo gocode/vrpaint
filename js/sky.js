@@ -4,6 +4,7 @@ import * as THREE from 'three';
 // passage d'avions de temps en temps et, plus rarement, étoiles filantes.
 
 const R = 150;
+const _sphere = new THREE.Sphere();
 // La bande passe au-dessus du mur (vers -z) puis derrière le joueur, légèrement inclinée.
 const GAL_N = new THREE.Vector3(0.96, 0.18, 0.2).normalize();      // normale du plan galactique
 const GAL_C = new THREE.Vector3(-0.12, 0.42, -0.9).normalize();    // direction du bulbe, au-dessus du mur
@@ -187,6 +188,19 @@ export class Sky {
     this.stars.visible = night && !ar;
     this.group.visible = !ar;
     if (!night) { this.plane.visible = false; this.meteor.visible = false; }
+  }
+
+  // Cadence utile pour le ciel dans ce champ de vision : étoiles qui scintillent
+  // (lent), avion ou étoile filante (pleine cadence).
+  motion(frustum) {
+    if (!this.group.visible || !this.night) return 0;
+    if (this.meteor.visible) return Infinity;
+    if (this.plane.visible) {
+      _sphere.center.copy(this.plane.position).add(this.group.position);
+      _sphere.radius = 12;
+      if (frustum.intersectsSphere(_sphere)) return Infinity;
+    }
+    return 30;
   }
 
   update(dt, camera, pixelRatio = 1) {

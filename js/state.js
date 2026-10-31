@@ -45,6 +45,7 @@ export const state = {
   pressure: 1,     // souris : pression de la gâchette
   angle: 0,        // souris : rotation du flat cap (degrés)
   leftHanded: false,
+  spectator: 'tete', // vue du PC pendant une session Link : tete, mur, off
 };
 
 const PREFS_KEY = 'vrpaint.prefs';

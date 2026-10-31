@@ -71,12 +71,54 @@ export function runTest({ set, state, PAINTS, world, WALL, params, readWall }) {
         for (let k = 0; k < low.length; k++) if (k % 4 !== 3) diff = Math.max(diff, Math.abs(low[k] - blank[k]));
         console.log(`VRPAINT_CLEAR_CHECK ${diff === 0 ? 'OK' : 'ECHEC'} ecart=${diff}`);
         v.actions.undo();
+        orderCheck(renderer, v);
         // passage en nuit après le contrôle : l'image de référence est de jour
         if (params.get('test') === 'night') set({ night: true });
         document.title = 'VRPAINT_DONE';
       }
     },
   };
+}
+
+// L'image ne doit pas dépendre de l'ordre de dessin des objets opaques : sinon
+// deux surfaces trop proches se disputent la profondeur et, de loin, l'une
+// perce l'autre en rayures dès que cet ordre change (tri, découpage, nouvel
+// objet). On rend chaque vue deux fois, matériaux dans un ordre puis dans
+// l'autre, et on compte les pixels qui changent.
+function orderCheck(renderer, v) {
+  const scene = v.world.scene, gl = renderer.getContext();
+  let camera; scene.traverse(o => { if (o.isPerspectiveCamera && !camera) camera = o; });
+  const keep = { p: v.rig.position.clone(), yaw: v.desktop.yaw, pitch: v.desktop.pitch, night: v.state.night };
+  const shot = () => {
+    renderer.render(scene, camera);
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px;
+  };
+  // quelques dizaines de pixels d'arêtes sont normaux ; des rayures en font des milliers
+  const LIMIT = 1000;
+  const res = [];
+  let worst = 0;
+  for (const [name, p, yaw, pitch, night] of [
+    ['rue-nuit', [12, 0, 9.5], 0.25, 0.02, true], ['rue', [14, 0, 8.4], Math.PI - 0.35, 0.05, false],
+    ['mur-loin', [0, 0, 16], 0, 0.02, false], ['arriere', [0, 0, 6], Math.PI, 0.05, false],
+  ]) {
+    v.set({ night });
+    v.rig.position.set(...p); v.desktop.yaw = yaw; v.desktop.pitch = pitch;
+    v.desktop.update(0);
+    renderer.setOpaqueSort((a, b) => a.material.id - b.material.id || a.z - b.z);
+    const a = shot();
+    renderer.setOpaqueSort((a, b) => b.material.id - a.material.id || a.z - b.z);
+    const b = shot();
+    let n = 0;
+    for (let i = 0; i < a.length; i += 4) if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 8) n++;
+    res.push(`${name}=${n}`);
+    worst = Math.max(worst, n);
+  }
+  renderer.setOpaqueSort(null);
+  v.set({ night: keep.night });
+  v.rig.position.copy(keep.p); v.desktop.yaw = keep.yaw; v.desktop.pitch = keep.pitch;
+  console.log(`VRPAINT_ORDER_CHECK ${worst < LIMIT ? 'OK' : 'ECHEC'} ${res.join(' ')}`);
 }
 
 function tri(x) { const k = x % 2; return k < 1 ? k : 2 - k; }

@@ -210,6 +210,7 @@ function beamTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+const _sphere = new THREE.Sphere();
 const partsCache = {};
 function carParts(kind) {
   if (partsCache[kind]) return partsCache[kind];
@@ -287,6 +288,16 @@ export class Traffic {
         this.pool.push(c.obj);
       }
     }
+  }
+
+  // Une voiture roule-t-elle dans ce champ de vision ? (phares compris la nuit)
+  movingIn(frustum) {
+    for (const l of this.lanes) for (const c of l.cars) {
+      _sphere.center.set(c.x, l.y + 0.7, l.z);
+      _sphere.radius = c.obj.userData.len / 2 + (this.night ? 9.5 : 0.5);
+      if (frustum.intersectsSphere(_sphere)) return true;
+    }
+    return false;
   }
 
   // Voiture en mouvement la plus proche d'un point (pour le son)

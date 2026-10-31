@@ -572,11 +572,49 @@ function interiorMaterial() {
     vertexShader: INTERIOR_VERT,
     fragmentShader: INTERIOR_FRAG,
     fog: true,
+    // la vitre n'est qu'à 6 mm de la façade : au loin, la profondeur n'a plus
+    // cette finesse et l'ordre de dessin décidait du gagnant (rayures)
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
       uNight: { value: 0 }, uTime: { value: 0 },
       uSkyTop: { value: new THREE.Color(0x5d9bd6) }, uSkyHorizon: { value: new THREE.Color(0xdbe6ee) },
     }]),
   });
+}
+
+// Tronçons de rue : les géométries sont fusionnées par matériau ET par tronçon,
+// pour que le moteur écarte ce qui est hors du champ et dessine du plus proche
+// au plus loin, au lieu de tout tracer en un bloc quelle que soit la vue.
+const CHUNK_X = 24, CHUNK_Z = 12;
+const chunkKey = (x, z) => `${Math.floor(x / CHUNK_X)}:${Math.floor(z / CHUNK_Z)}`;
+
+function addChunked(group, mat, list) {
+  const buckets = new Map();
+  for (const g of list) {
+    g.computeBoundingBox();
+    const b = g.boundingBox;
+    const k = chunkKey((b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(g);
+  }
+  const meshes = [];
+  for (const l of buckets.values()) {
+    const m = new THREE.Mesh(mergeGeometries(l), mat);
+    group.add(m);
+    meshes.push(m);
+  }
+  return meshes;
+}
+
+// Vitres rangées par tronçon (voir addChunked)
+class ChunkedGlass {
+  constructor() { this.batches = new Map(); }
+  add(corner, ...rest) {
+    const k = chunkKey(corner.x, corner.z);
+    if (!this.batches.has(k)) this.batches.set(k, new GlassBatch());
+    this.batches.get(k).add(corner, ...rest);
+  }
+  meshes(material) { return [...this.batches.values()].map(b => b.mesh(material)); }
 }
 
 // Lot de vitres : un quadrilatère par fenêtre, tout dans un seul maillage.
@@ -729,7 +767,7 @@ export function buildStreet(Z) {
   // Immeubles
   const byMat = new Map();
   const add = (mat, g) => { if (!byMat.has(mat)) byMat.set(mat, []); byMat.get(mat).push(g); };
-  const glass = new GlassBatch();
+  const glass = new ChunkedGlass();
   const canvases = [];
   const segs = A.shopSegments;
   const UP = new THREE.Vector3(0, 1, 0);
@@ -825,9 +863,8 @@ export function buildStreet(Z) {
   row(edge, L / 2, Z - 0.25, 1, 2, 5, 'd');
   row(-L / 2, L / 2, zFar, -1, 2, 6, 'f');
   row(-edge - 10, edge + 10, Z - 0.3 - 15, 1, 3, 7, 'b');
-  for (const [mat, list] of byMat) group.add(new THREE.Mesh(mergeGeometries(list), mat));
-  const glassMesh = glass.mesh(A.interior);
-  group.add(glassMesh);
+  for (const [mat, list] of byMat) addChunked(group, mat, list);
+  group.add(...glass.meshes(A.interior));
 
   // Réverbères des deux trottoirs, un tous les 20 m, l'un d'eux près du mur
   const poles = [], heads = [], pools = [];
@@ -848,8 +885,8 @@ export function buildStreet(Z) {
   const near = edge + 1.5;
   for (let x = near - 100; x <= L / 2; x += 20) if (x > -L / 2) lampAt(x, zRoad - 0.4, 1);
   for (let x = near - 110; x <= L / 2; x += 20) if (x > -L / 2) lampAt(x, zWalk2 + 0.4, -1);
-  group.add(new THREE.Mesh(mergeGeometries(poles), A.pole));
-  group.add(new THREE.Mesh(mergeGeometries(heads), A.lampHead));
+  addChunked(group, A.pole, poles);
+  addChunked(group, A.lampHead, heads);
   const poolMesh = new THREE.Mesh(mergeGeometries(pools), A.pool);
   poolMesh.renderOrder = 1;
   group.add(poolMesh);
@@ -873,11 +910,11 @@ export function buildStreet(Z) {
       bins.push(b);
     }
   }
-  group.add(new THREE.Mesh(mergeGeometries(trunks), A.trunk));
-  group.add(new THREE.Mesh(mergeGeometries(leaves), A.foliage));
-  group.add(new THREE.Mesh(mergeGeometries(grates), A.grate));
-  if (benches.length) group.add(new THREE.Mesh(mergeGeometries(benches), A.wood));
-  if (bins.length) group.add(new THREE.Mesh(mergeGeometries(bins), A.bin));
+  addChunked(group, A.trunk, trunks);
+  addChunked(group, A.foliage, leaves);
+  addChunked(group, A.grate, grates);
+  addChunked(group, A.wood, benches);
+  addChunked(group, A.bin, bins);
 
   // Voitures garées le long des deux trottoirs (créneau), sauf devant le mur
   const carGeo = new Map();
@@ -894,7 +931,7 @@ export function buildStreet(Z) {
   };
   park(zWalk2 - 1.15, Math.PI, () => false);
   park(zRoad + 1.15, 0, (cx, len) => Math.abs(cx) < edge + 3 + len / 2);
-  for (const [mat, list] of carGeo) group.add(new THREE.Mesh(mergeGeometries(list), mat));
+  for (const [mat, list] of carGeo) addChunked(group, mat, list);
 
   return {
     group,

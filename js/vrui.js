@@ -398,7 +398,7 @@ export class VRPalette {
     this.editing = false;
     switch (r.type) {
       case 'edit': return this.openEditor();
-      case 'tab': this.tab = r.id; this.hover = null; this.highlight.visible = false; return this.draw();
+      case 'tab': if (r.id === 'projects') actions.refreshProjects?.(); this.tab = r.id; this.hover = null; this.highlight.visible = false; return this.draw();
       case 'paint': return set({ paint: r.paint });
       case 'cap': return set({ cap: r.cap.id, capScale: 1 });
       case 'finish': this.finish = r.id; return setCustom(hsvToHex(this.h, this.s, this.v), r.id);

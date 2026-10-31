@@ -74,9 +74,13 @@ vec3 toSRGB(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 void main() {
-  vec4 s = texture2D(tSrc, vUv);
+  // lecture texel par texel (la cible a la taille de la couche) : le filtrage et les
+  // mipmaps mêleraient un peu les voisins au bord des traits presque transparents
+  vec4 s = texelFetch(tSrc, ivec2(gl_FragCoord.xy), 0);
   float a = clamp(s.a, 0.0, 1.0);
-  vec3 c = s.a > 1e-5 ? s.rgb / s.a : vec3(0.0);
+  // alpha qui s'arrondit à 0 sur 8 bits : texel vide, sans couleur résiduelle
+  // (sinon chaque enregistrement + réouverture changerait ces texels invisibles)
+  vec3 c = s.a >= 0.5 / 255.0 ? s.rgb / s.a : vec3(0.0);
   gl_FragColor = vec4(uMode == 1 ? clamp(c, 0.0, 1.0) : toSRGB(c), a);
 }`;
 
@@ -358,7 +362,9 @@ export class PaintSurface {
       const L = layers[k];
       if (!L) continue;
       const tex = new THREE.DataTexture(L.data, L.w, L.h, THREE.RGBAFormat, THREE.UnsignedByteType);
-      tex.minFilter = tex.magFilter = THREE.LinearFilter;
+      // même taille : copie texel à texel ; sinon (autre appareil, autre résolution) interpolation
+      const same = L.w === this.targets[k].width && L.h === this.targets[k].height;
+      tex.minFilter = tex.magFilter = same ? THREE.NearestFilter : THREE.LinearFilter;
       tex.needsUpdate = true;
       this._blit(this.decodeMat, tex, this.targets[k], k === 'aux' ? 1 : 0);
       tex.dispose();

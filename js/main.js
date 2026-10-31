@@ -9,11 +9,13 @@ import { XRControls } from './xr.js';
 import { VRPalette } from './vrui.js';
 import { buildUI, setXRSupport, toast } from './ui.js';
 import { SprayAudio } from './audio.js';
-import { saveProject, loadProject, listProjects, deleteProject, renameProject, newProjectId } from './storage.js';
+import { saveProject, loadProject, listProjects, deleteProject, renameProject, newProjectId, moveLocalProjects } from './storage.js';
 import { runTest } from './test.js';
 import { History } from './history.js';
 import { CanvasManager } from './canvases.js';
 import { RefBoard } from './refs.js';
+import { Spectator } from './spectator.js';
+import { FrameScheduler } from './frames.js';
 
 const params = new URLSearchParams(location.search);
 const headset = /OculusBrowser|Quest|Pico/i.test(navigator.userAgent);
@@ -41,8 +43,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
-renderer.xr.setFoveation(0.6);
-if (!renderer.extensions.has('EXT_color_buffer_float') && !renderer.extensions.has('EXT_color_buffer_half_float')) {
+renderer.xr.setFoveation(0.6);if (!renderer.extensions.has('EXT_color_buffer_float') && !renderer.extensions.has('EXT_color_buffer_half_float')) {
   console.warn('Render targets flottants non supportés : la peinture risque de ne pas s\'afficher.');
 }
 
@@ -78,6 +79,9 @@ const palette = new VRPalette();
 const desktop = new DesktopControls({ camera, rig, canvas, world, audio, wall: WALL, canvases: allCanvases });
 const xr = new XRControls({ renderer, rig, camera, palette, world, audio, wall: WALL });
 const refBoard = new RefBoard({ scene, palette, wall: WALL });
+// Vue spectateur sur l'écran du PC pendant une session Link. Dans le navigateur
+// du casque, personne ne voit la page : on n'y dépense rien.
+const spectator = headset ? null : new Spectator({ renderer, scene, wall: WALL });
 
 function flushAll() {
   surface.flush();
@@ -91,9 +95,14 @@ function applyState(patch) {
   if ('night' in patch) { world.setNight(state.night); world.setCanPaint(state.paint); }
   if ('wall' in patch) world.setWallType(state.wall);
   if ('wallWidth' in patch || 'wallHeight' in patch) resizeWall(state.wallWidth, state.wallHeight);
+  if ('spectator' in patch && spectator) {
+    spectator.mode = state.spectator;
+    spectator.fresh = true;
+    document.body.classList.toggle('spec-off', state.spectator === 'off');
+  }
 }
 subscribe(applyState);
-applyState({ paint: 1, cap: 1, drips: 1, night: 1, wall: 1 });
+applyState({ paint: 1, cap: 1, drips: 1, night: 1, wall: 1, spectator: 1 });
 
 // --- Taille du mur ------------------------------------------------------------
 // La peinture est reprise telle quelle dans le monde : mur centré, pied fixe.
@@ -184,11 +193,23 @@ function exportPhoto() {
 }
 
 // --- Projets -------------------------------------------------------------------
-let dirty = false, lastPaint = 0, saving = null, loadedId = null;
+// loadedDate : date de la version ouverte. Les projets sont communs au PC et au casque :
+// si l'autre appareil enregistre une version plus récente du projet ouvert ici (sans
+// modification en cours), elle est rechargée.
+let dirty = false, lastPaint = 0, saving = null, loadedId = null, loadedDate = 0, following = false;
 function markDirty() { dirty = true; lastPaint = performance.now(); }
 
+const newerElsewhere = id => {
+  const p = (state.projects || []).find(x => x.id === id);
+  return !!p && id === loadedId && p.date > loadedDate;
+};
+
 async function refreshProjects() {
-  try { set({ projects: await listProjects() }); } catch (e) { console.warn(e); }
+  try { set({ projects: await listProjects() }); } catch (e) { console.warn(e); return; }
+  if (!dirty && !saving && !following && newerElsewhere(loadedId)) {
+    following = true;
+    try { await openProject(loadedId, 'Projet mis à jour depuis l\'autre appareil'); } finally { following = false; }
+  }
 }
 
 async function saveCurrent(manual = false) {
@@ -198,7 +219,7 @@ async function saveCurrent(manual = false) {
   saving = (async () => {
     try {
       const id = state.projectId || newProjectId();
-      await saveProject({
+      const rec = await saveProject({
         id,
         name: state.projectName,
         wall: state.wall,
@@ -211,8 +232,11 @@ async function saveCurrent(manual = false) {
         extra: Object.fromEntries(await Promise.all(canvases.painted().map(async c => [c.id, await c.surface.exportLayers()]))),
         refs: state.refs,
       });
-      if (state.projectId !== id) set({ projectId: id });
-      loadedId = id;
+      // projet enregistré entre-temps sur l'autre appareil : cette version a été gardée à part
+      if (rec.id !== id) notify(`Modifié aussi sur l'autre appareil : ta version devient « ${rec.name} »`);
+      if (state.projectId !== rec.id || state.projectName !== rec.name) set({ projectId: rec.id, projectName: rec.name });
+      loadedId = rec.id;
+      loadedDate = rec.date;
       await refreshProjects();
       if (manual) notify(`« ${state.projectName} » enregistré`);
     } catch (e) {
@@ -241,12 +265,13 @@ async function newProject() {
   history.reset();
   set({ projectId: null, projectName: nextName() });
   loadedId = null;
+  loadedDate = 0;
   dirty = false;
   notify(`Nouveau projet : ${state.projectName}`);
 }
 
-async function openProject(id) {
-  if (id === loadedId && !dirty) return;
+async function openProject(id, message = null) {
+  if (id === loadedId && !dirty && !newerElsewhere(id)) return;
   await saveCurrent();
   const p = await loadProject(id);
   if (!p) { notify('Projet introuvable'); return refreshProjects(); }
@@ -259,8 +284,9 @@ async function openProject(id) {
   history.reset();
   set({ projectId: p.id, projectName: p.name, wall: p.wall || state.wall, savedColors: p.savedColors || [], refs: p.refs || [] });
   loadedId = p.id;
+  loadedDate = p.date;
   dirty = false;
-  notify(`Projet « ${p.name} » ouvert`);
+  notify(message || `Projet « ${p.name} » ouvert`);
 }
 
 async function removeProject(id) {
@@ -271,14 +297,17 @@ async function removeProject(id) {
 }
 
 actions.newProject = newProject;
-actions.openProject = openProject;
+actions.openProject = id => openProject(id);
+actions.refreshProjects = refreshProjects;
 actions.deleteProject = removeProject;
 actions.renameProject = async name => {
   set({ projectName: name });
   if (state.projectId) { await renameProject(state.projectId, name); await refreshProjects(); }
 };
 actions.save = () => saveCurrent(true);
-addEventListener('visibilitychange', () => { if (document.hidden) saveCurrent(); });
+addEventListener('visibilitychange', () => { if (document.hidden) saveCurrent(); else refreshProjects(); });
+// liste tenue à jour : un projet enregistré sur l'autre appareil apparaît ici
+setInterval(() => { if (!document.hidden) refreshProjects(); }, 15e3);
 
 function notify(msg) {
   toast(msg);
@@ -331,11 +360,19 @@ renderer.xr.addEventListener('sessionstart', () => {
   camera.position.set(0, 0, 0);
   camera.rotation.set(0, 0, 0);
   xr.start();
+  spectator?.start();
+  if (spectator) document.body.classList.add('xr-live');
 });
 renderer.xr.addEventListener('sessionend', () => {
   xr.end();
+  spectator?.end();
+  document.body.classList.remove('xr-live');
   world.setAR(false);
   renderer.setClearColor(0x000000, 1);
+  // Three.js a laissé à la caméra le champ du casque et rendu au canvas sa taille du début
+  camera.fov = 60;
+  camera.zoom = 1;
+  resize();
   desktop.reset();
   saveCurrent();
 });
@@ -362,6 +399,8 @@ detectXR();
 navigator.xr?.addEventListener('devicechange', detectXR);
 if (!params.has('test')) {
   (async () => {
+    const moved = await moveLocalProjects().catch(e => { console.warn('Copie des projets locaux impossible', e); return 0; });
+    if (moved) notify(`${moved} projet${moved > 1 ? 's' : ''} de ce navigateur ajouté${moved > 1 ? 's' : ''} aux projets du PC`);
     await refreshProjects();
     const list = state.projects || [];
     const last = list.find(p => p.id === state.projectId) || list[0];
@@ -372,6 +411,7 @@ if (!params.has('test')) {
 
 // Centre la vue sur la zone non couverte par le panneau latéral.
 function resize() {
+  if (renderer.xr.isPresenting) return;   // la vue spectateur suit seule la fenêtre
   const w = innerWidth, h = innerHeight, side = w > 760 ? 300 : 0;
   camera.aspect = w / h;
   if (side) camera.setViewOffset(w + side, h, 0, 0, w, h);
@@ -385,8 +425,19 @@ resize();
 const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall }) : null;
 window.__vrpaint = {
   get surface() { return surface; }, spray, history, canvases,
-  state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette,
+  state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator,
 };
+
+// Hors casque, pas d'image recalculée quand l'écran n'a pas à changer.
+// ?frames=all rend toutes les images (comparaison).
+const frames = new FrameScheduler(renderer, camera);
+const allFrames = params.get('frames') === 'all';
+subscribe(() => frames.invalidate());
+addEventListener('resize', () => frames.invalidate(300));
+for (const ev of ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'focus'])
+  addEventListener(ev, () => frames.invalidate(150), { passive: true });
+document.addEventListener('visibilitychange', () => frames.invalidate());
+window.__vrpaint.frames = frames;
 
 const clock = new THREE.Clock();
 const _camPos = new THREE.Vector3();
@@ -411,6 +462,11 @@ renderer.setAnimationLoop(() => {
   world.updateLift(rig);
 
   if (dirty && !saving && !spraying && !spray.drips.length && performance.now() - lastPaint > 4000 && !test) saveCurrent();
+  const draw = presenting || test || allFrames || input || spraying || spray.drips.length
+    || frames.shouldRender(world.motion(camera));
+  if (!draw) return;
   renderer.render(scene, camera);
+  frames.rendered();
+  if (presenting) spectator?.render(dt, renderer.xr.getCamera());
   if (test) test.after(renderer);
 });

@@ -6,6 +6,8 @@ import {
 } from './state.js';
 import { drawCapIcon, editorHex } from './vrui.js';
 import { importImage, addRefs, removeRef, currentRef, REF_SIDES } from './refs.js';
+import { SPECTATOR_MODES } from './spectator.js';
+import { projectsWhere } from './storage.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -89,11 +91,13 @@ export function buildUI() {
         <button type="button" data-action="newProject">Nouveau projet</button>
       </div>
       <ul class="projects" id="projects"></ul>
+      <p class="help" id="projects-where"></p>
     </section>
     <section class="xr">
       <button type="button" id="enter-vr" class="primary" disabled>Entrer en VR</button>
       <button type="button" id="enter-ar" hidden>Entrer en AR (passthrough)</button>
       <p id="xr-status"></p>
+      <label class="row" id="spectator-row">Vue sur le PC pendant la VR <select id="spectator">${SPECTATOR_MODES.map(([id, n]) => `<option value="${id}">${n}</option>`).join('')}</select></label>
       <p id="lan-url" class="lan" hidden></p>
     </section>
     <details>
@@ -179,6 +183,23 @@ export function buildUI() {
   $('#enter-vr').addEventListener('click', () => actions.enterVR());
   $('#enter-ar').addEventListener('click', () => actions.enterAR());
   $('#panel-toggle').addEventListener('click', () => document.body.classList.toggle('panel-open'));
+  $('#spectator').addEventListener('change', e => set({ spectator: e.target.value }));
+  // dans le navigateur du casque, personne ne regarde la page
+  $('#spectator-row').hidden = /OculusBrowser|Quest|Pico/i.test(navigator.userAgent);
+
+  // Barre de la vue spectateur, affichée pendant une session VR rendue par le PC
+  const bar = $('#specbar');
+  bar.innerHTML = SPECTATOR_MODES.map(([id, n]) => `<button type="button" data-spec="${id}">${n}</button>`).join('') +
+    '<button type="button" data-spec="full" title="Plein écran (Échap pour sortir)">Plein écran</button>' +
+    '<span class="msg">Vue coupée : le PC ne calcule que l\'image du casque.</span>';
+  bar.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.spec !== 'full') set({ spectator: b.dataset.spec });
+    else if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.().catch(() => toast('Plein écran refusé par le navigateur'));
+    b.blur();
+  });
 
   let lastProjects = null, lastSaved = null, lastRefs = null;
   const sync = (patch = {}) => {
@@ -227,6 +248,8 @@ export function buildUI() {
     const ref = currentRef(), view = $('#refview');
     view.hidden = !(ref && state.refShow);
     if (ref) { $('img', view).src = refUrl(ref); view.style.setProperty('--ref-h', `${Math.round(180 * (state.refScale || 1))}px`); }
+    $('#spectator').value = state.spectator;
+    bar.querySelectorAll('[data-spec]').forEach(b => b.classList.toggle('on', b.dataset.spec === state.spectator));
     $('#night').checked = state.night;
     $('#drips').checked = state.drips;
     $('#aim').checked = state.aim;
@@ -241,6 +264,9 @@ export function buildUI() {
           </button>
           <button type="button" class="del" data-delete="${pr.id}" title="Supprimer">✕</button>
         </li>`).join('') || '<li class="help">Aucun projet enregistré.</li>';
+      const where = projectsWhere();
+      $('#projects-where').textContent = where === 'pc' ? 'Enregistrés sur le PC : les mêmes dans le casque.'
+        : where === 'navigateur' ? 'Enregistrés dans ce navigateur seulement (jeu non servi par le PC).' : '';
     }
     $('#hud').innerHTML = `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${cap.name} ${Math.round(state.capScale * 100)} % · ${Math.round(state.distance * 100)} cm · ${Math.round(state.pressure * 100)} %`;
   };

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { buildStreet } from './street.js';
 import { Sky } from './sky.js';
 import { Traffic } from './cars.js';
+import { cameraFrustum } from './frames.js';
 
 // ---------------------------------------------------------------------------
 // Textures procédurales (aucun fichier externe)
@@ -367,7 +368,9 @@ export class World {
     this.wallUniforms = {
       uPaint: { value: null }, uAux: { value: null }, uGlow: { value: null }, uGlowK: { value: 0.2 },
     };
-    this.wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 });
+    // le mur peint n'est qu'à 0,5 mm du massif en béton : sans décalage de
+    // profondeur, de loin c'est l'ordre de dessin qui décide lequel se voit
+    this.wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
     this.wallMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, this.wallUniforms);
       sh.fragmentShader = 'uniform sampler2D uPaint;\nuniform sampler2D uAux;\nuniform sampler2D uGlow;\nuniform float uGlowK;\n' + sh.fragmentShader
@@ -535,6 +538,15 @@ export class World {
     this.skyDome.update(dt, camera, pixelRatio);
     this.street.update(dt);
     this.traffic.update(dt);
+  }
+
+  // Cadence d'image utile pour ce qui bouge seul dans le champ de cette caméra
+  // (0 : image fixe, Infinity : pleine cadence). La nuit, étoiles, télés et
+  // néons scintillent lentement : 30 images/s suffisent à les rendre à l'identique.
+  motion(camera) {
+    const f = cameraFrustum(camera, this._frustum ??= new THREE.Frustum());
+    if (this.traffic.movingIn(f)) return Infinity;
+    return Math.max(this.skyDome.motion(f), this.night ? 30 : 0);
   }
 
   setAR(ar) {
