@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { state, set, currentCap, CAP_SCALE } from './state.js';
+import { state, set, currentCap, CAP_SCALE, pressedTool } from './state.js';
 import { strokeWidthCm } from './spray.js';
-import { scraperById } from './scraper.js';
 import { MASK_SIZE } from './stencils.js';
 
 const DEG = Math.PI / 180;
@@ -251,7 +250,7 @@ export class TouchControls {
       const v = clamp(round(b.maskSize * g.scale, 0.005), ...MASK_SIZE);
       if (v !== state.maskSize) set({ maskSize: v });
       text = `Prochain cache ${Math.round(state.maskSize * 200)} cm`;
-    } else if (scraperById(state.tool)) {
+    } else if (pressedTool(state.tool)) {
       const v = clamp(round(b.pressure * g.scale, 0.05), 0.1, 1);
       if (v !== state.pressure) set({ pressure: v });
       text = `Pression ${Math.round(state.pressure * 100)} %`;

@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import { runOutilsTest } from './test-outils.js';
 
 // Peinture scriptée pour vérifier le moteur sans casque : index.html?test
 // (?test=night pour finir en mode nuit). Chaque trait est rejoué image par image.
 export function runTest(ctx) {
   if (ctx.params.get('test') === 'caches') return runCachesTest(ctx);
+  if (ctx.params.get('test') === 'outils') return runOutilsTest(ctx);
   const { set, PAINTS, world, WALL, params, readWall } = ctx;
   // image du mur vierge en basse résolution (elle passe par les mipmaps), prise avant tout trait
   const blank = readWall(32, 12);

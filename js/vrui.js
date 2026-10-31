@@ -8,14 +8,53 @@ import {
 } from './state.js';
 import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon, shapeOutline } from './stencils.js';
 import { scraperById } from './scraper.js';
+import { brushById, brushSize } from './brush.js';
+import { NEWSPAPER } from './newspaper.js';
 
-// Icône d'outil : bombe, feuille de pochoir, lame de racloir.
+const cm = v => String(Math.round(v * 1000) / 10).replace('.', ',') + ' cm';
+
+// Icône d'outil : bombe, pinceaux, feuille de pochoir, lame de racloir, papier froissé.
 export function drawToolIcon(ctx, id, x, y, w, h, color = '#e8e8e8') {
   const cx = x + w / 2, cy = y + h / 2, u = Math.min(w, h) / 10;
   ctx.save();
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
-  if (id === 'bombe') {
+  const brush = brushById(id);
+  if (brush) {
+    // manche, virole, poils (ronds en pointe ou plats, coupés droit)
+    ctx.lineWidth = u * 0.9;
+    ctx.beginPath(); ctx.moveTo(cx, cy + 0.6 * u); ctx.lineTo(cx, cy + 4.4 * u); ctx.stroke();
+    const fw = brush.kind === 'rond' ? 1.1 * u : 2.2 * u;
+    ctx.fillRect(cx - fw, cy - 0.6 * u, 2 * fw, 1.4 * u);
+    ctx.beginPath();
+    if (brush.kind === 'rond') {
+      ctx.moveTo(cx - fw, cy - 0.6 * u);
+      ctx.quadraticCurveTo(cx - 1.6 * u, cy - 2.6 * u, cx, cy - 4.4 * u);
+      ctx.quadraticCurveTo(cx + 1.6 * u, cy - 2.6 * u, cx + fw, cy - 0.6 * u);
+    } else {
+      ctx.rect(cx - fw, cy - 4 * u, 2 * fw, 3.4 * u);
+    }
+    ctx.globalAlpha = 0.8;
+    ctx.fill();
+  } else if (id === NEWSPAPER.id) {
+    // boule de papier froissé : contour cassé, plis
+    const pts = [[-3.4, -0.6], [-2.4, -2.8], [-0.4, -3.4], [1.6, -3], [3.3, -1.4], [3.5, 0.9], [2.2, 3], [-0.2, 3.4], [-2.6, 2.4]];
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i ? ctx.lineTo(cx + px * u, cy + py * u) : ctx.moveTo(cx + px * u, cy + py * u)));
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#131418';
+    ctx.lineWidth = u * 0.35;
+    ctx.beginPath();
+    for (const [a, b] of [[0, 4], [1, 5], [2, 7], [3, 6], [8, 4]]) {
+      ctx.moveTo(cx + pts[a][0] * u * 0.9, cy + pts[a][1] * u * 0.9);
+      ctx.lineTo(cx + 0.2 * u, cy + 0.1 * u);
+      ctx.lineTo(cx + pts[b][0] * u * 0.9, cy + pts[b][1] * u * 0.9);
+    }
+    ctx.stroke();
+  } else if (id === 'bombe') {
     ctx.beginPath(); ctx.roundRect(cx - 1.6 * u, cy - 2.6 * u, 3.2 * u, 6 * u, u * 0.6); ctx.fill();
     ctx.fillRect(cx - 0.8 * u, cy - 3.8 * u, 1.6 * u, 1 * u);
   } else if (id === 'cache') {
@@ -261,9 +300,10 @@ export class VRPalette {
 
   _draw_tools(reg) {
     const c = this.ctx;
-    this._text('Outil en main', 32, 270, 30, '#d7dae0', 600);
+    this._text('Outil en main', 32, 266, 30, '#d7dae0', 600);
+    // deux rangées : ce qui pose la peinture, puis ce qui l'enlève
     TOOLS.forEach((t, i) => {
-      const r = reg({ type: 'tool', id: t.id, x: 32 + i * 194, y: 290, w: 186, h: 150 });
+      const r = reg({ type: 'tool', id: t.id, x: 32 + (i % 4) * 244, y: 284 + Math.floor(i / 4) * 142, w: 232, h: 132 });
       const on = t.id === state.tool;
       c.fillStyle = on ? '#3b4252' : '#1e2027';
       c.beginPath(); c.roundRect(r.x, r.y, r.w, r.h, 18); c.fill();
@@ -275,16 +315,17 @@ export class VRPalette {
       c.fillText(t.name, r.x + r.w / 2, r.y + r.h - 14);
       c.textAlign = 'left';
     });
-    const help = lines => lines.forEach((l, i) => this._text(l, 32, 1010 + i * 42, 28));
+    const help = (lines, y0 = 1104) => lines.forEach((l, i) => this._text(l, 32, y0 + i * 40, 28));
+    const brush = brushById(state.tool);
     if (state.tool === 'cache') {
-      this._text('Forme', 32, 490, 30, '#d7dae0', 600);
+      this._text('Forme', 32, 610, 30, '#d7dae0', 600);
       SHAPES.forEach((sh, i) => {
-        const r = reg({ type: 'shape', id: sh.id, x: 32 + i * 161, y: 510, w: 153, h: 130 });
+        const r = reg({ type: 'shape', id: sh.id, x: 32 + i * 161, y: 626, w: 153, h: 120 });
         const on = sh.id === state.maskShape;
         c.fillStyle = on ? '#3b4252' : '#1e2027';
         c.beginPath(); c.roundRect(r.x, r.y, r.w, r.h, 18); c.fill();
         if (on) { c.strokeStyle = '#fff'; c.lineWidth = 4; c.stroke(); }
-        drawShapeIcon(c, sh.id, r.x, r.y + 4, r.w, r.h - 40, '#9cc8e8');
+        drawShapeIcon(c, sh.id, r.x, r.y + 4, r.w, r.h - 38, '#9cc8e8');
         c.fillStyle = '#d7dae0';
         c.font = `600 24px ${FONT}`;
         c.textAlign = 'center';
@@ -297,18 +338,36 @@ export class VRPalette {
         ['lift', `Décollement : ${lift} mm${lift <= 1 ? ' (net)' : lift >= 10 ? ' (flou)' : ''}`],
       ];
       rows.forEach(([k, label], i) => {
-        const y = 660 + i * 115;
-        this._button(reg({ type: 'btn', id: k + 'Less', x: 32, y, w: 140, h: 100 }), '−', { size: 48 });
-        this._button(reg({ type: 'btn', id: k + 'More', x: 852, y, w: 140, h: 100 }), '+', { size: 48 });
+        const y = 762 + i * 108;
+        this._button(reg({ type: 'btn', id: k + 'Less', x: 32, y, w: 140, h: 96 }), '−', { size: 48 });
+        this._button(reg({ type: 'btn', id: k + 'More', x: 852, y, w: 140, h: 96 }), '+', { size: 48 });
         c.textAlign = 'center';
-        this._text(label, 512, y + 62, 36, '#f2f2f2', 600);
+        this._text(label, 512, y + 60, 36, '#f2f2f2', 600);
         c.textAlign = 'left';
       });
-      this._button(reg({ type: 'btn', id: 'removeMasks', x: 32, y: 890, w: 960, h: 90 }), 'Retirer tous les caches', { danger: true });
+      this._button(reg({ type: 'btn', id: 'removeMasks', x: 32, y: 980, w: 960, h: 80 }), 'Retirer tous les caches', { danger: true });
       help(['Gâchette sur le mur : poser un cache, glisser pour le placer.',
         'Gâchette sur un cache : le déplacer ; tourner le poignet : rotation.',
         'Joystick ↑↓ en visant un cache : taille · A : le retirer.',
         'Les caches se superposent ; un cache décollé donne un bord flou.']);
+    } else if (brush) {
+      this._text('Taille', 32, 610, 30, '#d7dae0', 600);
+      const cur = brushSize(brush, state.brushSizes);
+      brush.sizes.forEach((v, i) => {
+        this._button(reg({ type: 'brushSize', id: brush.id, size: v, x: 32 + i * 325, y: 626, w: 315, h: 100 }),
+          (brush.kind === 'rond' ? 'Ø ' : '') + cm(v), { on: v === cur, size: 36 });
+      });
+      help(['Approche les poils du mur : ils peignent au contact.',
+        'Plie-les (ou presse la gâchette) pour élargir et charger le trait.',
+        brush.kind === 'plat' ? 'La tranche suit le poignet : à plat en travers, une bande ;' : 'Le trait garde la trace des poils et pâlit à mesure',
+        brush.kind === 'plat' ? 'de chant, un filet. La charge s\'épuise le long du trait.' : 'que la charge s\'épuise, jusqu\'au pinceau sec.',
+        'Décolle-le du mur un instant : il est rechargé.'], 800);
+    } else if (state.tool === NEWSPAPER.id) {
+      help(['Tamponne le mur avec la boule de papier, ou frotte :',
+        'elle emporte une fine couche de la peinture fraîche ou récente',
+        'et laisse voir les couches sèches du dessous.',
+        'Écrase-la (ou presse la gâchette) pour un contact plus large.',
+        'À chaque appui, le papier tourne et se re-froisse.'], 640);
     } else if (scraperById(state.tool)) {
       help(['Approche la lame du mur : elle racle au contact.',
         'Enfonce-la (ou presse la gâchette) pour appuyer plus fort.',
@@ -316,7 +375,7 @@ export class VRPalette {
         'glisser dans son axe ne fait rien. Légère : retire la dernière',
         'couche. Forte : jusqu\'au mur, avec des éclats et des stries.']);
     } else {
-      help(['Gâchette latérale (bombe) : passer au dernier outil et revenir.']);
+      help(['Gâchette latérale (bombe) : passer au dernier outil et revenir.'], 640);
     }
   }
 
@@ -516,6 +575,7 @@ export class VRPalette {
       case 'cap': return set({ cap: r.cap.id, capScale: 1 });
       case 'tool': return setTool(r.id);
       case 'shape': return set({ maskShape: r.id });
+      case 'brushSize': return set({ brushSizes: { ...state.brushSizes, [r.id]: r.size } });
       case 'finish': this.finish = r.id; return setCustom(hsvToHex(this.h, this.s, this.v), r.id);
       case 'saveColor': saveCurrentColor(); return this.flash('Couleur enregistrée dans Mes couleurs');
       case 'removeColor': return removeSavedColor(+state.paint.id.slice(5));

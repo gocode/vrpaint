@@ -1,6 +1,8 @@
 import { PAINTS, paintById, customPaint, baseHex, finishOf } from './palette.js';
 import { CAPS, tuneCap } from './spray.js';
-import { SCRAPERS } from './scraper.js';
+import { SCRAPERS, scraperById } from './scraper.js';
+import { BRUSHES, brushById } from './brush.js';
+import { NEWSPAPER } from './newspaper.js';
 
 export const WALLS = [
   { id: 'briques', name: 'Briques' },
@@ -22,12 +24,20 @@ export const WALL_LIMITS = { width: [3, 16, 1], height: [2, 6, 0.5] };
 export const CAP_SCALE = [0.3, 2.5];
 export const MAX_SAVED_COLORS = 16;
 
-// Outils en main : la bombe, les caches, les racloirs
+// Outils en main : ceux qui posent la peinture (bombe, pinceaux) et les caches,
+// puis ceux qui l'enlèvent (racloirs, papier journal)
 export const TOOLS = [
   { id: 'bombe', name: 'Bombe', hint: 'peindre (touche B)' },
+  ...BRUSHES.map(t => ({ id: t.id, name: t.name, short: t.short, hint: t.hint })),
   { id: 'cache', name: 'Caches', hint: 'poser, déplacer, tourner les pochoirs (touche M)' },
   ...SCRAPERS.map(t => ({ id: t.id, name: t.name, hint: t.hint + ' (touche R)' })),
+  { id: NEWSPAPER.id, name: NEWSPAPER.name, hint: NEWSPAPER.hint },
 ];
+
+// Outils qui travaillent au contact du mur, avec une pression : racloirs, pinceaux, papier journal
+export function pressedTool(id) {
+  return !!(scraperById(id) || brushById(id) || id === NEWSPAPER.id);
+}
 
 export const state = {
   paint: paintById('p13'),   // Rouge
@@ -60,6 +70,7 @@ export const state = {
   maskShape: 'rond',
   maskSize: 0.15,      // demi-taille du prochain cache (m)
   maskLift: 0.002,     // décollement du prochain cache (m)
+  brushSizes: {},      // taille choisie de chaque pinceau (m), voir brush.js
   touchDrag: 'regarder',   // écran tactile, deux doigts qui glissent : regarder | glisser (le long du mur)
   touchPinch: 'largeur',   // pincer : largeur (de l'outil) | avancer (vers le mur)
   touchPad: true,          // croix de déplacement à l'écran

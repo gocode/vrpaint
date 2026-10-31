@@ -222,6 +222,13 @@ try {
   r = await ev(`(() => { const v = __vrpaint; v.set({ tool: 'cache', maskSize: 0.15 }); __btn(0, true); __stick(0, -1); __run(40); __stick(0, 0); __btn(0, false); __run(1);
     const s = v.state.maskSize, cap = v.state.capScale; v.set({ tool: 'bombe' }); return { s, msg: v.palette.message }; })()`);
   check('avec les caches : gâchette gauche + ↑ agrandit le prochain cache', r.s > 0.15, `${r.s} m « ${r.msg} »`);
+  r = await ev(`(() => { const v = __vrpaint; v.set({ tool: 'pinceau-rond', brushSizes: {} }); const cap = v.state.capScale;
+    const size = () => v.state.brushSizes['pinceau-rond'] ?? 'défaut';
+    __btn(0, true); __stick(0, -1); __run(20); const up1 = size(); __stick(0, 0); __run(2); __stick(0, -1); __run(5); const up2 = size(); __stick(0, 0); __run(2);
+    __stick(0, -1); __run(5); const up3 = size(); __stick(0, 0); __run(2); __stick(0, 1); __run(5); const down = size(); __stick(0, 0); __btn(0, false); __run(1);
+    const res = { up1, up2, up3, down, capSame: v.state.capScale === cap, msg: v.palette.message }; v.set({ tool: 'bombe' }); return res; })()`);
+  check('avec un pinceau : gâchette gauche + ↑ ↓ change de taille, un cran par poussée', r.up1 === 0.05 && r.up2 === 0.05 && r.up3 === 0.05 && r.down === 0.025 && r.capSame,
+    `${r.up1} → ${r.up2} → ${r.up3} → ${r.down} « ${r.msg} »`);
   r = await ev(`(() => { const v = __vrpaint, h = v.xr.hands[0], P = new v.rig.position.constructor();
     h.grip.position.set(0, 1, -0.3); h.grip.updateMatrix(); __btn(1, true); __run(1);
     h.grip.updateMatrixWorld(true); h.grip.getWorldPosition(P); const anchor = P.clone(), a = __pos();

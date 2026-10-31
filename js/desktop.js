@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { state, set, actions, setTool } from './state.js';
+import { state, set, actions, setTool, pressedTool } from './state.js';
 import { CAPS } from './spray.js';
 import { SCRAPERS, scraperById } from './scraper.js';
+import { BRUSHES, brushById, brushSize, brushReach } from './brush.js';
+import { NEWSPAPER } from './newspaper.js';
 import { MASK_SIZE } from './stencils.js';
 import { TouchControls } from './touch.js';
 
@@ -11,6 +13,7 @@ const _d = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
 const DEG = Math.PI / 180;
 const ATTACK = 35 * DEG;   // angle de la lame sur le mur en mode souris
+const TILT = 30 * DEG;     // pinceau : manche incliné vers le bas, pour qu'on le voie
 
 // Mode souris / écran tactile. La bombe est tenue perpendiculaire au mur, à
 // state.distance de la surface visée par le pointeur. Avec les caches, un clic
@@ -56,7 +59,7 @@ export class DesktopControls {
       e.preventDefault();
       const d = e.deltaY || e.deltaX;
       if (state.tool === 'cache') { this._wheelMask(d, e.shiftKey); return; }
-      if (scraperById(state.tool) && !e.shiftKey) {
+      if (pressedTool(state.tool) && !e.shiftKey) {
         set({ pressure: THREE.MathUtils.clamp(Math.round(state.pressure * 20 - Math.sign(d)) / 20, 0.1, 1) });
         return;
       }
@@ -81,6 +84,8 @@ export class DesktopControls {
       else if (k === 'x') { this.audio.ensure(); this.audio.rattle(); }
       else if (k === 'b') setTool('bombe');
       else if (k === 'm') setTool('cache');
+      else if (k === 'p') setTool(state.tool === BRUSHES[0].id ? BRUSHES[1].id : BRUSHES[0].id);
+      else if (k === 'j') setTool(NEWSPAPER.id);
       else if (k === 'r') {
         const i = SCRAPERS.findIndex(t => t.id === state.tool);
         setTool(SCRAPERS[(i + 1) % SCRAPERS.length].id);
@@ -190,6 +195,18 @@ export class DesktopControls {
       return inp;
     }
     inp.attack = undefined;
+    const br = brushById(state.tool);
+    if (br || state.tool === NEWSPAPER.id) {
+      // pinceau tenu presque droit, poils sur le point visé ; papier plaqué sur le mur
+      inp.origin.copy(hit.point).addScaledVector(f.n, 0.05);
+      _f.copy(f.n).multiplyScalar(Math.cos(TILT)).addScaledVector(inp.up, -Math.sin(TILT));   // vers la main
+      _r.crossVectors(_f, inp.right);
+      const mesh = br ? this.tools.brush.meshes.get(br.id) : this.tools.newspaper.mesh;
+      mesh.quaternion.setFromRotationMatrix(_m4.makeBasis(inp.right, _r, _f));
+      const reach = br ? brushReach(br, brushSize(br, state.brushSizes)) : NEWSPAPER.reach - NEWSPAPER.radius * 0.3;
+      mesh.position.copy(hit.point).addScaledVector(_f, reach);
+      return inp;
+    }
 
     // bombe affichée à sa position réelle, buse vers le mur
     const can = this.world.can;
