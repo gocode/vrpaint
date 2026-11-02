@@ -19,8 +19,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireValidSyntax } from './syntaxe.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+requireValidSyntax();
 const OUT = path.join(ROOT, 'tmp', 'tactile');
 fs.mkdirSync(OUT, { recursive: true });
 const PHASES = process.argv.slice(2).length ? process.argv.slice(2) : ['touch', 'mouse', 'test'];

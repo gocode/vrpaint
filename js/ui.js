@@ -2,13 +2,15 @@ import { PAINTS, GROUPS, FINISHES, finishOf } from './palette.js';
 import { CAPS, strokeWidthCm } from './spray.js';
 import {
   state, set, subscribe, actions, WALLS, WALL_LIMITS, CAP_SCALE, currentCap,
-  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool,
+  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool, SIZED_TOOLS, toolSize,
 } from './state.js';
 import { drawCapIcon, drawToolIcon, editorHex } from './vrui.js';
 import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon } from './stencils.js';
 import { scraperById } from './scraper.js';
-import { BRUSHES, brushById, brushSize } from './brush.js';
+import { brushById, brushSize } from './brush.js';
 import { NEWSPAPER } from './newspaper.js';
+import { TORCH, torchReach } from './torch.js';
+import { SPONGE } from './sponge.js';
 import { importImage, addRefs, removeRef, currentRef, REF_SIDES } from './refs.js';
 import { SPECTATOR_MODES } from './spectator.js';
 import { projectsWhere } from './storage.js';
@@ -65,16 +67,24 @@ export function buildUI() {
         <p class="help">Clic sur le mur : poser un cache (glisser pour le placer) · clic sur un cache : le déplacer ·
           molette dessus : taille · Maj + molette : rotation · Suppr : le retirer. Plaqué, le bord est net ; décollé, il s'estompe.</p>
       </div>
-      ${BRUSHES.map(b => `<div class="brush-opts" data-brush-opts="${b.id}">
-        <h2>Taille du pinceau ${b.kind === 'rond' ? '(diamètre)' : '(largeur)'}</h2>
-        <div class="finishes">${b.sizes.map(v => `<button type="button" data-brush="${b.id}" data-size="${v}">${num(Math.round(v * 1000) / 10)} cm</button>`).join('')}</div>
+      ${SIZED_TOOLS.map(b => `<div class="brush-opts" data-brush-opts="${b.id}">
+        <h2>${b.sizeTitle || `Taille du pinceau ${b.kind === 'rond' ? '(diamètre)' : '(largeur)'}`}</h2>
+        ${b.range ? `<label class="slider">${b.sizeWord} <output data-size-out="${b.id}"></output>
+          <input type="range" data-size-range="${b.id}" min="${b.range[0] * 100}" max="${b.range[1] * 100}" step="1"></label>`
+        : `<div class="finishes">${b.sizes.map(v => `<button type="button" data-brush="${b.id}" data-size="${v}">${num(Math.round(v * 1000) / 10)} cm</button>`).join('')}</div>`}
       </div>`).join('')}
       <p class="help" id="brush-help">Glisser sur le mur pour peindre avec la couleur en cours : le trait garde la trace des poils
         et pâlit quand la charge s'épuise ; lâcher un instant recharge le pinceau. Molette : pression (le pinceau rond s'écrase
         et s'élargit) · Maj + molette : angle du pinceau plat (de chant, il trace un filet).</p>
-      <p class="help" id="paper-help">Cliquer pour tamponner, glisser pour frotter : le papier froissé emporte une fine couche
-        de peinture fraîche ou récente et laisse voir les couches sèches du dessous. Chaque appui donne un nouveau froissage.
-        Molette : pression (contact plus large).</p>
+      <p class="help" id="sponge-help">Cliquer pour tamponner, glisser pour frotter : l'éponge pose la couleur en cours
+        avec son grain (îlots percés de pores), différent à chaque appui ; frottée, elle l'étale en stries. Elle se vide
+        d'un appui à l'autre ; lâcher une seconde la recharge. Molette : pression (l'éponge s'écrase, contact plus large).</p>
+      <p class="help" id="paper-help">Cliquer pour tamponner, glisser pour frotter : le papier froissé emporte la peinture
+        fraîche par éclats anguleux et laisse voir les couches sèches du dessous. Rester appuyé : il en boit davantage ;
+        sèche, la peinture ne part presque plus. Chaque appui donne un nouveau froissage. Molette : pression (contact plus large).</p>
+      <p class="help" id="torch-help">Maintenir le clic : la flamme sèche la peinture fraîche sous elle (le papier journal ne
+        l'emporte plus, elle ne coule plus). Une grande flamme sèche d'un coup une grande surface, et porte plus loin.
+        Molette : distance au mur ; plus près, la flamme chauffe plus fort (25 cm au plus pour la flamme de 6 cm).</p>
       <p class="help" id="scraper-help">Glisser sur le mur pour racler : la lame retire la dernière couche et laisse voir
         celle du dessous ; à forte pression, elle va jusqu'au mur. Molette : pression · Maj + molette : angle de la lame.</p>
     </section>
@@ -114,6 +124,7 @@ export function buildUI() {
       <label class="check"><input type="checkbox" id="night"> Nuit (phospho)</label>
       <label class="check"><input type="checkbox" id="drips"> Coulures</label>
       <label class="check" title="Gouttelettes autour du trait et jet qui crachote à mi-gâchette ; décoché : trait propre"><input type="checkbox" id="spatter"> Projections</label>
+      <label class="check" title="Les pinceaux et l'éponge se vident en peignant et se rechargent quand on les décolle du mur ; décoché : ils restent toujours pleins"><input type="checkbox" id="realLoad"> Charge réaliste (pinceaux, éponge)</label>
       <label class="check"><input type="checkbox" id="aim"> Viseur</label>
     </section>
     <section>
@@ -160,7 +171,7 @@ export function buildUI() {
         <li><b>Clic droit + glisser</b> : regarder autour</li>
         <li><b>ZQSD</b> ou flèches : se déplacer · <b>A / E</b> : descendre / monter</li>
         <li><b>1 à 5</b> : caps · <b>Ctrl + Z</b> : annuler</li>
-        <li><b>B</b> : bombe · <b>P</b> : pinceau rond / plat · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir) · <b>J</b> : papier journal</li>
+        <li><b>B</b> : bombe · <b>P</b> : pinceau rond / plat · <b>M</b> : caches · <b>R</b> : racloirs (couteau, spatule, grattoir) · <b>J</b> : papier journal · <b>T</b> : chalumeau</li>
         <li>Caches : <b>clic</b> poser / déplacer · <b>molette</b> taille · <b>Maj + molette</b> rotation · <b>Suppr</b> retirer</li>
         <li><b>N</b> : nuit · <b>V</b> : viseur · <b>C</b> : coulures · <b>X</b> : secouer</li>
         <li>Au doigt : <b>un doigt</b> peint · <b>deux doigts</b> regardent autour · <b>pincer</b> : largeur du jet ·
@@ -214,6 +225,9 @@ export function buildUI() {
   $('#distance').addEventListener('input', e => set({ distance: e.target.value / 100 }));
   $('#angle').addEventListener('input', e => set({ angle: +e.target.value }));
   $('#mask-size').addEventListener('input', e => set({ maskSize: e.target.value / 200 }));
+  panel.querySelectorAll('[data-size-range]').forEach(el => el.addEventListener('input', e => {
+    set({ brushSizes: { ...state.brushSizes, [el.dataset.sizeRange]: e.target.value / 100 } });
+  }));
   $('#mask-lift').addEventListener('input', e => set({ maskLift: e.target.value / 1000 }));
   $('#wall').addEventListener('change', e => set({ wall: e.target.value }));
   const sizeInput = () => {
@@ -230,7 +244,7 @@ export function buildUI() {
     if (file) actions.openProjectFile(file);
   });
   $('#project-name').addEventListener('change', e => actions.renameProject(e.target.value.trim() || 'Sans titre'));
-  for (const id of ['night', 'drips', 'spatter', 'aim']) $('#' + id).addEventListener('change', e => set({ [id]: e.target.checked }));
+  for (const id of ['night', 'drips', 'spatter', 'realLoad', 'aim']) $('#' + id).addEventListener('change', e => set({ [id]: e.target.checked }));
   $('#ref-file').addEventListener('change', async e => {
     const files = [...e.target.files];
     e.target.value = '';
@@ -292,9 +306,16 @@ export function buildUI() {
     $('#scraper-help').hidden = !scr;
     const br = brushById(state.tool);
     panel.querySelectorAll('[data-brush-opts]').forEach(el => { el.hidden = el.dataset.brushOpts !== state.tool; });
-    panel.querySelectorAll('[data-brush]').forEach(b => b.classList.toggle('on', +b.dataset.size === brushSize(brushById(b.dataset.brush), state.brushSizes)));
+    panel.querySelectorAll('[data-brush]').forEach(b => b.classList.toggle('on', +b.dataset.size === toolSize(b.dataset.brush)));
     $('#brush-help').hidden = !br;
     $('#paper-help').hidden = state.tool !== NEWSPAPER.id;
+    $('#sponge-help').hidden = state.tool !== SPONGE.id;
+    panel.querySelectorAll('[data-size-range]').forEach(el => {
+      const cm = Math.round(toolSize(el.dataset.sizeRange) * 100);
+      el.value = cm;
+      panel.querySelector(`[data-size-out="${el.dataset.sizeRange}"]`).textContent = cm + ' cm';
+    });
+    $('#torch-help').hidden = state.tool !== TORCH.id;
     $('#mask-size').value = Math.round(state.maskSize * 200);
     $('#o-msize').textContent = Math.round(state.maskSize * 200) + ' cm';
     $('#mask-lift').value = Math.round(state.maskLift * 1000);
@@ -312,7 +333,7 @@ export function buildUI() {
     $('#o-distance').textContent = Math.round(state.distance * 100) + ' cm';
     $('#angle').value = state.angle;
     $('#o-angle').textContent = state.angle + '°';
-    $('#angle-row').classList.toggle('dim', (state.tool === 'bombe' && state.cap !== 'flat') || state.tool === NEWSPAPER.id || br?.kind === 'rond');
+    $('#angle-row').classList.toggle('dim', (state.tool === 'bombe' && state.cap !== 'flat') || state.tool === NEWSPAPER.id || state.tool === SPONGE.id || state.tool === TORCH.id || br?.kind === 'rond');
     $('#wall').value = state.wall;
     if ('wallWidth' in patch || 'wallHeight' in patch || patch.init) {
       $('#wall-w').value = state.wallWidth;
@@ -338,6 +359,7 @@ export function buildUI() {
     $('#night').checked = state.night;
     $('#drips').checked = state.drips;
     $('#spatter').checked = state.spatter;
+    $('#realLoad').checked = state.realLoad;
     $('#aim').checked = state.aim;
     $('#touch-drag').value = state.touchDrag;
     $('#touch-pinch').value = state.touchPinch;
@@ -363,7 +385,9 @@ export function buildUI() {
       ? `Caches · ${SHAPES.find(s => s.id === state.maskShape)?.name} ${Math.round(state.maskSize * 200)} cm · décollé de ${Math.round(state.maskLift * 1000)} mm`
       : scr ? `${tool.name} · pression ${Math.round(state.pressure * 100)} % · lame à ${state.angle}°`
       : br ? `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${tool.name} ${num(Math.round(brushSize(br, state.brushSizes) * 1000) / 10)} cm · pression ${Math.round(state.pressure * 100)} %${br.kind === 'plat' ? ` · ${state.angle}°` : ''}`
-      : state.tool === NEWSPAPER.id ? `Papier journal · pression ${Math.round(state.pressure * 100)} %`
+      : state.tool === SPONGE.id ? `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · Éponge ${num(Math.round(toolSize(SPONGE.id) * 1000) / 10)} cm · pression ${Math.round(state.pressure * 100)} %`
+      : state.tool === NEWSPAPER.id ? `Papier journal ${num(Math.round(toolSize(NEWSPAPER.id) * 1000) / 10)} cm · pression ${Math.round(state.pressure * 100)} %`
+      : state.tool === TORCH.id ? `Chalumeau · flamme ${Math.round(toolSize(TORCH.id) * 100)} cm · à ${Math.round(state.distance * 100)} cm du mur${state.distance > torchReach(toolSize(TORCH.id)) ? ' (trop loin pour chauffer)' : ''}`
         : `<span class="dot" style="${swatchStyle(p)}"></span>${esc(p.name)} · ${cap.name} ${Math.round(state.capScale * 100)} % · ${Math.round(state.distance * 100)} cm · ${Math.round(state.pressure * 100)} %`;
   };
   subscribe(sync);

@@ -20,8 +20,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireValidSyntax } from './syntaxe.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+requireValidSyntax();
 const OUT = path.join(ROOT, 'tmp', 'casque');
 fs.mkdirSync(OUT, { recursive: true });
 const CHROME = process.env.CHROME || ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -191,6 +193,10 @@ try {
     v.palette._buttonAction('spatter'); const now = v.state.spatter, sprayNow = v.spray.spatter; v.palette._buttonAction('spatter');
     return { exists: !!b, was, now, sprayNow, back: v.state.spatter }; })()`);
   check('Réglages : bouton « Projections » qui bascule la bombe', r.exists && r.was && !r.now && !r.sprayNow && r.back, JSON.stringify(r));
+  r = await ev(`(() => { const v = __vrpaint, b = v.palette.regions.find(r => r.id === 'realLoad'); const was = v.state.realLoad;
+    v.palette._buttonAction('realLoad'); const now = v.state.realLoad; v.palette._buttonAction('realLoad');
+    return { exists: !!b, was, now, back: v.state.realLoad }; })()`);
+  check('Réglages : bouton « Charge réaliste » qui bascule', r.exists && r.was && !r.now && r.back, JSON.stringify(r));
 
   // --- main de la palette (manette gauche simulée) --------------------------------------------
   await ev(`(() => {
@@ -229,6 +235,16 @@ try {
     const res = { up1, up2, up3, down, capSame: v.state.capScale === cap, msg: v.palette.message }; v.set({ tool: 'bombe' }); return res; })()`);
   check('avec un pinceau : gâchette gauche + ↑ ↓ change de taille, un cran par poussée', r.up1 === 0.05 && r.up2 === 0.05 && r.up3 === 0.05 && r.down === 0.025 && r.capSame,
     `${r.up1} → ${r.up2} → ${r.up3} → ${r.down} « ${r.msg} »`);
+  r = await ev(`(() => { const v = __vrpaint; v.set({ tool: 'journal', brushSizes: {} });
+    __btn(0, true); __stick(0, -1); __run(5); const up = v.state.brushSizes.journal; __stick(0, 0); __run(2); __stick(0, -1); __run(5); const up2 = v.state.brushSizes.journal;
+    __stick(0, 0); __btn(0, false); __run(1); const res = { up, up2, msg: v.palette.message }; v.set({ tool: 'bombe', brushSizes: {} }); return res; })()`);
+  check('avec le papier journal : gâchette gauche + ↑ grossit la boule', r.up === 0.14 && r.up2 === 0.18, `${r.up} → ${r.up2} « ${r.msg} »`);
+  for (const [id, what] of [['eponge', 'l\'éponge'], ['chalumeau', 'la flamme']]) {
+    r = await ev(`(() => { const v = __vrpaint; v.set({ tool: '${id}', brushSizes: {} });
+      __btn(0, true); __stick(0, -1); __run(5); const up = v.state.brushSizes['${id}']; __stick(0, 0); __run(2); __stick(0, 1); __run(5); const down = v.state.brushSizes['${id}'];
+      __stick(0, 0); __btn(0, false); __run(1); const res = { up, down, msg: v.palette.message }; v.set({ tool: 'bombe', brushSizes: {} }); return res; })()`);
+    check(`avec ${what} : gâchette gauche + ↑ ↓ change la taille`, r.up > (id === 'eponge' ? 0.08 : 0.06) && r.down < r.up && /cm/.test(r.msg), `${r.up} → ${r.down} « ${r.msg} »`);
+  }
   r = await ev(`(() => { const v = __vrpaint, h = v.xr.hands[0], P = new v.rig.position.constructor();
     h.grip.position.set(0, 1, -0.3); h.grip.updateMatrix(); __btn(1, true); __run(1);
     h.grip.updateMatrixWorld(true); h.grip.getWorldPosition(P); const anchor = P.clone(), a = __pos();

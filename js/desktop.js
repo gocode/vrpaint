@@ -3,7 +3,9 @@ import { state, set, actions, setTool, pressedTool } from './state.js';
 import { CAPS } from './spray.js';
 import { SCRAPERS, scraperById } from './scraper.js';
 import { BRUSHES, brushById, brushSize, brushReach } from './brush.js';
-import { NEWSPAPER } from './newspaper.js';
+import { NEWSPAPER, paperReach } from './newspaper.js';
+import { TORCH } from './torch.js';
+import { SPONGE, spongeReach, spongeDepth } from './sponge.js';
 import { MASK_SIZE } from './stencils.js';
 import { TouchControls } from './touch.js';
 
@@ -71,7 +73,10 @@ export class DesktopControls {
     }, { passive: false });
 
     addEventListener('keydown', e => {
-      if (e.target.closest?.('input, select, textarea')) return;
+      // un champ garde ses touches ; une case à cocher ou une barre du panneau ne garde que les
+      // siennes (espace, flèches…) : après un clic dessus, les lettres restent des raccourcis
+      const field = e.target.closest?.('input, select, textarea');
+      if (field && !(['checkbox', 'range'].includes(field.type) && /^Key[A-Z]$/.test(e.code))) return;
       this.shift = e.shiftKey;
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); actions.undo(); return; }
@@ -86,6 +91,8 @@ export class DesktopControls {
       else if (k === 'm') setTool('cache');
       else if (k === 'p') setTool(state.tool === BRUSHES[0].id ? BRUSHES[1].id : BRUSHES[0].id);
       else if (k === 'j') setTool(NEWSPAPER.id);
+      else if (k === 't') setTool(TORCH.id);
+      else if (k === 'g') setTool(SPONGE.id);
       else if (k === 'r') {
         const i = SCRAPERS.findIndex(t => t.id === state.tool);
         setTool(SCRAPERS[(i + 1) % SCRAPERS.length].id);
@@ -195,23 +202,24 @@ export class DesktopControls {
       return inp;
     }
     inp.attack = undefined;
-    const br = brushById(state.tool);
-    if (br || state.tool === NEWSPAPER.id) {
-      // pinceau tenu presque droit, poils sur le point visé ; papier plaqué sur le mur
+    const br = brushById(state.tool), sp = state.tool === SPONGE.id;
+    if (br || sp || state.tool === NEWSPAPER.id) {
+      // pinceau tenu presque droit, poils sur le point visé ; éponge et papier plaqués sur le mur
       inp.origin.copy(hit.point).addScaledVector(f.n, 0.05);
       _f.copy(f.n).multiplyScalar(Math.cos(TILT)).addScaledVector(inp.up, -Math.sin(TILT));   // vers la main
       _r.crossVectors(_f, inp.right);
-      const mesh = br ? this.tools.brush.meshes.get(br.id) : this.tools.newspaper.mesh;
+      const mesh = br ? this.tools.brush.meshes.get(br.id) : sp ? this.tools.sponge.mesh : this.tools.newspaper.mesh;
       mesh.quaternion.setFromRotationMatrix(_m4.makeBasis(inp.right, _r, _f));
-      const reach = br ? brushReach(br, brushSize(br, state.brushSizes)) : NEWSPAPER.reach - NEWSPAPER.radius * 0.3;
+      const size = brushSize(br || (sp ? SPONGE : NEWSPAPER), state.brushSizes);
+      const reach = br ? brushReach(br, size) : sp ? spongeReach(size) - spongeDepth(size) * 0.15 : paperReach(size) - size * 0.15;
       mesh.position.copy(hit.point).addScaledVector(_f, reach);
       return inp;
     }
 
-    // bombe affichée à sa position réelle, buse vers le mur
-    const can = this.world.can;
+    // bombe (ou chalumeau) affichée à sa position réelle, buse vers le mur
+    const can = state.tool === TORCH.id ? this.tools.torch.mesh : this.world.can;
     can.position.copy(inp.origin);
-    can.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(inp.right, inp.up, f.n));
+    can.quaternion.setFromRotationMatrix(_m4.makeBasis(inp.right, inp.up, f.n));
     return inp;
   }
 
