@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { state, set, currentCap, CAP_SCALE, pressedTool } from './state.js';
 import { strokeWidthCm } from './spray.js';
 import { MASK_SIZE } from './stencils.js';
+import { TORCH } from './torch.js';
 
 const DEG = Math.PI / 180;
 const HOLD_MS = 120;     // un doigt seul ne peint qu'après ce délai (ou dès qu'il glisse)…
@@ -215,7 +216,7 @@ export class TouchControls {
   _pinchBegin(p) {
     const g = this.g;
     g.kind = 'pinch';
-    g.base = { capScale: state.capScale, maskSize: state.maskSize, pressure: state.pressure };
+    g.base = { capScale: state.capScale, maskSize: state.maskSize, pressure: state.pressure, distance: state.distance };
     g.mask = null;
     if (state.touchPinch !== 'avancer' && state.tool === 'cache') {
       // cache sous les doigts : c'est lui qu'on règle (taille et rotation)
@@ -250,6 +251,11 @@ export class TouchControls {
       const v = clamp(round(b.maskSize * g.scale, 0.005), ...MASK_SIZE);
       if (v !== state.maskSize) set({ maskSize: v });
       text = `Prochain cache ${Math.round(state.maskSize * 200)} cm`;
+    } else if (state.tool === TORCH.id) {
+      // chalumeau : écarter les doigts approche la flamme du mur
+      const v = clamp(round(b.distance / g.scale, 0.01), 0.02, 0.4);
+      if (v !== state.distance) set({ distance: v });
+      text = `Flamme à ${Math.round(state.distance * 100)} cm du mur`;
     } else if (pressedTool(state.tool)) {
       const v = clamp(round(b.pressure * g.scale, 0.05), 0.1, 1);
       if (v !== state.pressure) set({ pressure: v });

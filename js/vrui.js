@@ -4,16 +4,18 @@ import { CAPS, strokeWidthCm } from './spray.js';
 import { REF_SIDES, refBitmap } from './refs.js';
 import {
   state, set, subscribe, actions, WALLS, WALL_LIMITS, CAP_SCALE, currentCap,
-  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool,
+  setCustom, savedPaints, saveCurrentColor, removeSavedColor, TOOLS, setTool, toolSize, sizedTool,
 } from './state.js';
 import { SHAPES, MASK_SIZE, MASK_LIFT, drawShapeIcon, shapeOutline } from './stencils.js';
 import { scraperById } from './scraper.js';
-import { brushById, brushSize } from './brush.js';
+import { brushById } from './brush.js';
 import { NEWSPAPER } from './newspaper.js';
+import { TORCH, torchReach } from './torch.js';
+import { SPONGE } from './sponge.js';
 
 const cm = v => String(Math.round(v * 1000) / 10).replace('.', ',') + ' cm';
 
-// Icône d'outil : bombe, pinceaux, feuille de pochoir, lame de racloir, papier froissé.
+// Icône d'outil : bombe, pinceaux, éponge, feuille de pochoir, lame de racloir, papier froissé, chalumeau.
 export function drawToolIcon(ctx, id, x, y, w, h, color = '#e8e8e8') {
   const cx = x + w / 2, cy = y + h / 2, u = Math.min(w, h) / 10;
   ctx.save();
@@ -36,6 +38,20 @@ export function drawToolIcon(ctx, id, x, y, w, h, color = '#e8e8e8') {
     }
     ctx.globalAlpha = 0.8;
     ctx.fill();
+  } else if (id === SPONGE.id) {
+    // galet bosselé percé de pores
+    const pts = [[-3.6, -1.2], [-2.6, -2.8], [-0.6, -3.1], [1.4, -2.9], [3.3, -2.0], [3.7, 0.4], [2.9, 2.4], [0.6, 2.9], [-1.8, 2.7], [-3.5, 1.4]];
+    const mid = (a, b) => [cx + (a[0] + b[0]) / 2 * u, cy + (a[1] + b[1]) / 2 * u];
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(...mid(pts[pts.length - 1], pts[0]));
+    pts.forEach((q, i) => ctx.quadraticCurveTo(cx + q[0] * u, cy + q[1] * u, ...mid(q, pts[(i + 1) % pts.length])));
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#131418';
+    for (const [px, py, r] of [[-2, -1.4, 0.5], [0.2, -1.9, 0.35], [1.9, -0.9, 0.6], [-0.6, 0.2, 0.7], [1.2, 1.4, 0.4], [-2.3, 1, 0.35], [2.6, 1, 0.3], [-0.9, 1.9, 0.3]]) {
+      ctx.beginPath(); ctx.arc(cx + px * u, cy + py * u, r * u, 0, Math.PI * 2); ctx.fill();
+    }
   } else if (id === NEWSPAPER.id) {
     // boule de papier froissé : contour cassé, plis
     const pts = [[-3.4, -0.6], [-2.4, -2.8], [-0.4, -3.4], [1.6, -3], [3.3, -1.4], [3.5, 0.9], [2.2, 3], [-0.2, 3.4], [-2.6, 2.4]];
@@ -54,6 +70,25 @@ export function drawToolIcon(ctx, id, x, y, w, h, color = '#e8e8e8') {
       ctx.lineTo(cx + pts[b][0] * u * 0.9, cy + pts[b][1] * u * 0.9);
     }
     ctx.stroke();
+  } else if (id === TORCH.id) {
+    // cartouche, tube coudé, flamme
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.roundRect(cx - 3.4 * u, cy - 0.4 * u, 2.8 * u, 4.6 * u, u * 0.5); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = u * 0.7;
+    ctx.beginPath(); ctx.moveTo(cx - 2 * u, cy - 0.4 * u); ctx.lineTo(cx - 2 * u, cy - 1.4 * u); ctx.lineTo(cx + 0.6 * u, cy - 1.4 * u); ctx.stroke();
+    ctx.fillStyle = '#ff9a3c';
+    ctx.beginPath();
+    ctx.moveTo(cx + 0.8 * u, cy - 2.2 * u);
+    ctx.quadraticCurveTo(cx + 3.2 * u, cy - 2.6 * u, cx + 4.4 * u, cy - 1.4 * u);
+    ctx.quadraticCurveTo(cx + 3.2 * u, cy - 0.2 * u, cx + 0.8 * u, cy - 0.6 * u);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#7fb4ff';
+    ctx.beginPath();
+    ctx.moveTo(cx + 0.8 * u, cy - 1.8 * u); ctx.lineTo(cx + 2.8 * u, cy - 1.4 * u); ctx.lineTo(cx + 0.8 * u, cy - 1 * u);
+    ctx.closePath();
+    ctx.fill();
   } else if (id === 'bombe') {
     ctx.beginPath(); ctx.roundRect(cx - 1.6 * u, cy - 2.6 * u, 3.2 * u, 6 * u, u * 0.6); ctx.fill();
     ctx.fillRect(cx - 0.8 * u, cy - 3.8 * u, 1.6 * u, 1 * u);
@@ -301,9 +336,9 @@ export class VRPalette {
   _draw_tools(reg) {
     const c = this.ctx;
     this._text('Outil en main', 32, 266, 30, '#d7dae0', 600);
-    // deux rangées : ce qui pose la peinture, puis ce qui l'enlève
+    // deux rangées de cinq : ce qui pose la peinture et les caches, puis ce qui l'enlève et le chalumeau
     TOOLS.forEach((t, i) => {
-      const r = reg({ type: 'tool', id: t.id, x: 32 + (i % 4) * 244, y: 284 + Math.floor(i / 4) * 142, w: 232, h: 132 });
+      const r = reg({ type: 'tool', id: t.id, x: 32 + (i % 5) * 194, y: 284 + Math.floor(i / 5) * 142, w: 186, h: 132 });
       const on = t.id === state.tool;
       c.fillStyle = on ? '#3b4252' : '#1e2027';
       c.beginPath(); c.roundRect(r.x, r.y, r.w, r.h, 18); c.fill();
@@ -312,11 +347,32 @@ export class VRPalette {
       c.fillStyle = '#d7dae0';
       c.font = `600 26px ${FONT}`;
       c.textAlign = 'center';
-      c.fillText(t.name, r.x + r.w / 2, r.y + r.h - 14);
+      c.fillText(t.name, r.x + r.w / 2, r.y + r.h - 14, r.w - 12);
       c.textAlign = 'left';
     });
     const help = (lines, y0 = 1104) => lines.forEach((l, i) => this._text(l, 32, y0 + i * 40, 28));
     const brush = brushById(state.tool);
+    // tailles fixes : une rangée de boutons ; taille continue (range) : une barre à glisser
+    const sizes = (tool, label) => {
+      const cur = toolSize(tool.id);
+      if (tool.range) {
+        this._text(`${tool.sizeWord} : ${cm(cur)}`, 32, 610, 30, '#d7dae0', 600);
+        const tr = reg({ type: 'sizeRange', id: tool.id, x: 32, y: 626, w: 960, h: 100 });
+        const f = (cur - tool.range[0]) / (tool.range[1] - tool.range[0]);
+        c.fillStyle = '#252831';
+        c.beginPath(); c.roundRect(tr.x, tr.y + 38, tr.w, 24, 12); c.fill();
+        c.fillStyle = '#ff4d6d';
+        c.beginPath(); c.roundRect(tr.x, tr.y + 38, tr.w * f, 24, 12); c.fill();
+        c.fillStyle = '#fff';
+        c.beginPath(); c.arc(tr.x + tr.w * f, tr.y + 50, 30, 0, Math.PI * 2); c.fill();
+        return;
+      }
+      this._text('Taille', 32, 610, 30, '#d7dae0', 600);
+      const n = tool.sizes.length, w = (960 - (n - 1) * 10) / n;
+      tool.sizes.forEach((v, i) => {
+        this._button(reg({ type: 'brushSize', id: tool.id, size: v, x: 32 + i * (w + 10), y: 626, w, h: 100 }), label(v), { on: v === cur, size: 36 });
+      });
+    };
     if (state.tool === 'cache') {
       this._text('Forme', 32, 610, 30, '#d7dae0', 600);
       SHAPES.forEach((sh, i) => {
@@ -351,23 +407,36 @@ export class VRPalette {
         'Joystick ↑↓ en visant un cache : taille · A : le retirer.',
         'Les caches se superposent ; un cache décollé donne un bord flou.']);
     } else if (brush) {
-      this._text('Taille', 32, 610, 30, '#d7dae0', 600);
-      const cur = brushSize(brush, state.brushSizes);
-      brush.sizes.forEach((v, i) => {
-        this._button(reg({ type: 'brushSize', id: brush.id, size: v, x: 32 + i * 325, y: 626, w: 315, h: 100 }),
-          (brush.kind === 'rond' ? 'Ø ' : '') + cm(v), { on: v === cur, size: 36 });
-      });
+      sizes(brush, v => (brush.kind === 'rond' ? 'Ø ' : '') + cm(v));
       help(['Approche les poils du mur : ils peignent au contact.',
         'Plie-les (ou presse la gâchette) pour élargir et charger le trait.',
         brush.kind === 'plat' ? 'La tranche suit le poignet : à plat en travers, une bande ;' : 'Le trait garde la trace des poils et pâlit à mesure',
         brush.kind === 'plat' ? 'de chant, un filet. La charge s\'épuise le long du trait.' : 'que la charge s\'épuise, jusqu\'au pinceau sec.',
-        'Décolle-le du mur un instant : il est rechargé.'], 800);
+        state.realLoad ? 'Décolle-le du mur un instant : il est rechargé.' : 'Charge réaliste coupée (Réglages) : il reste plein.'], 800);
+    } else if (state.tool === SPONGE.id) {
+      sizes(SPONGE, v => 'Ø ' + cm(v));
+      help(['Tamponne le mur : l\'éponge pose la couleur en cours avec',
+        'son grain, des îlots percés de pores, différent à chaque appui.',
+        'Écrase-la (ou presse la gâchette) : le contact s\'étend.',
+        'Frotte-la : elle étale la peinture en stries.',
+        ...(state.realLoad ? ['Elle se vide d\'un appui à l\'autre ; écarte-la du mur', 'une seconde : elle est rechargée.']
+          : ['Charge réaliste coupée (Réglages) : elle reste pleine.'])], 800);
     } else if (state.tool === NEWSPAPER.id) {
+      sizes(NEWSPAPER, v => 'Ø ' + cm(v));
       help(['Tamponne le mur avec la boule de papier, ou frotte :',
-        'elle emporte une fine couche de la peinture fraîche ou récente',
+        'elle emporte la peinture fraîche par éclats anguleux',
         'et laisse voir les couches sèches du dessous.',
-        'Écrase-la (ou presse la gâchette) pour un contact plus large.',
-        'À chaque appui, le papier tourne et se re-froisse.'], 640);
+        'Reste appuyé : le papier boit davantage. Sèche, la peinture',
+        'ne part presque plus. Écrase-la (ou la gâchette) : contact',
+        'plus large. À chaque appui, le papier se re-froisse.'], 800);
+    } else if (state.tool === TORCH.id) {
+      sizes(TORCH, v => cm(v));
+      help(['Gâchette : la flamme sèche la peinture fraîche.',
+        `Approche-la à quelques centimètres du mur (${Math.round(torchReach(toolSize(TORCH.id)) * 100)} cm au plus) :`,
+        'plus près, elle chauffe plus fort ; plus loin, plus large.',
+        'Grande flamme : une grande surface sèche d\'un coup.',
+        'Peinture séchée : le papier journal ne l\'emporte plus,',
+        'et elle ne coule plus (les coulures en cours se figent).'], 800);
     } else if (scraperById(state.tool)) {
       help(['Approche la lame du mur : elle racle au contact.',
         'Enfonce-la (ou presse la gâchette) pour appuyer plus fort.',
@@ -427,36 +496,38 @@ export class VRPalette {
     const buttons = [
       ['undo', 'Annuler'], ['clear', 'Effacer', true], ['night', state.night ? 'Jour' : 'Nuit'],
       ['drips', 'Coulures ' + (state.drips ? 'oui' : 'non')], ['spatter', 'Projections ' + (state.spatter ? 'oui' : 'non')],
+      ['realLoad', 'Charge réaliste ' + (state.realLoad ? 'oui' : 'non')],
       ['aim', 'Viseur ' + (state.aim ? 'oui' : 'non')], ['hand', state.leftHanded ? 'Gaucher' : 'Droitier'],
       ['save', 'Sauver'], ['photo', 'Photo'],
     ];
+    // rangées de 104 px : quatre rangées de boutons, le mur et sa taille tiennent au-dessus des caps (y = 1296)
     buttons.forEach(([id, label, danger], i) => {
-      this._button(reg({ type: 'btn', id, x: 32 + (i % 3) * 325, y: 240 + Math.floor(i / 3) * 116, w: 315, h: 104 }), label, { danger });
+      this._button(reg({ type: 'btn', id, x: 32 + (i % 3) * 325, y: 240 + Math.floor(i / 3) * 104, w: 315, h: 94 }), label, { danger });
     });
     // la suite descend avec le nombre de rangées de boutons
-    const dy = (Math.ceil(buttons.length / 3) - 2) * 116;
-    this._text('Type de mur', 32, 520 + dy, 30, '#d7dae0', 600);
+    const dy = 240 + Math.ceil(buttons.length / 3) * 104 - 472;
+    this._text('Type de mur', 32, 506 + dy, 30, '#d7dae0', 600);
     const name = WALLS.find(w => w.id === state.wall)?.name || 'Mur';
-    this._button(reg({ type: 'btn', id: 'wallPrev', x: 32, y: 540 + dy, w: 140, h: 100 }), '◀', { size: 40 });
-    this._button(reg({ type: 'btn', id: 'wallNext', x: 852, y: 540 + dy, w: 140, h: 100 }), '▶', { size: 40 });
+    this._button(reg({ type: 'btn', id: 'wallPrev', x: 32, y: 522 + dy, w: 140, h: 92 }), '◀', { size: 40 });
+    this._button(reg({ type: 'btn', id: 'wallNext', x: 852, y: 522 + dy, w: 140, h: 92 }), '▶', { size: 40 });
     this.ctx.textAlign = 'center';
-    this._text(name, 512, 604 + dy, 38, '#f2f2f2', 600);
+    this._text(name, 512, 582 + dy, 38, '#f2f2f2', 600);
     this.ctx.textAlign = 'left';
 
-    this._text('Taille du mur', 32, 700 + dy, 30, '#d7dae0', 600);
+    this._text('Taille du mur', 32, 664 + dy, 30, '#d7dae0', 600);
     const rows = [['W', 'Largeur', this.pendW, ' m'], ['H', 'Hauteur', this.pendH, ' m']];
     rows.forEach(([k, label, val, unit], i) => {
-      const y = 720 + dy + i * 120;
-      this._button(reg({ type: 'btn', id: 'dec' + k, x: 32, y, w: 140, h: 100 }), '−', { size: 48 });
-      this._button(reg({ type: 'btn', id: 'inc' + k, x: 852, y, w: 140, h: 100 }), '+', { size: 48 });
+      const y = 680 + dy + i * 104;
+      this._button(reg({ type: 'btn', id: 'dec' + k, x: 32, y, w: 140, h: 92 }), '−', { size: 48 });
+      this._button(reg({ type: 'btn', id: 'inc' + k, x: 852, y, w: 140, h: 92 }), '+', { size: 48 });
       this.ctx.textAlign = 'center';
-      this._text(`${label} : ${String(val).replace('.', ',')}${unit}`, 512, y + 62, 38, '#f2f2f2', 600);
+      this._text(`${label} : ${String(val).replace('.', ',')}${unit}`, 512, y + 58, 38, '#f2f2f2', 600);
       this.ctx.textAlign = 'left';
     });
     const changed = this.pendW !== state.wallWidth || this.pendH !== state.wallHeight;
-    this._button(reg({ type: 'btn', id: 'applySize', x: 32, y: 970 + dy, w: 960, h: 100 }),
+    this._button(reg({ type: 'btn', id: 'applySize', x: 32, y: 900 + dy, w: 960, h: 92 }),
       changed ? 'Appliquer la nouvelle taille' : `Mur actuel : ${state.wallWidth} × ${String(state.wallHeight).replace('.', ',')} m`, { on: changed });
-    this._text('La peinture déjà faite reste à sa place.', 32, 1120 + dy, 28);
+    this._text('La peinture déjà faite reste à sa place.', 32, 1036 + dy, 28);
   }
 
   _draw_model(reg) {
@@ -597,6 +668,7 @@ export class VRPalette {
       night: () => set({ night: !state.night }),
       drips: () => set({ drips: !state.drips }),
       spatter: () => set({ spatter: !state.spatter }),
+      realLoad: () => set({ realLoad: !state.realLoad }),
       aim: () => set({ aim: !state.aim }),
       hand: () => set({ leftHanded: !state.leftHanded }),
       save: () => actions.save(),
@@ -629,7 +701,7 @@ export class VRPalette {
     })[id]?.();
   }
 
-  // Glisser : sélecteur de couleur et potentiomètre de largeur
+  // Glisser : sélecteur de couleur, potentiomètre de largeur, barre de taille
   drag(hit) {
     const r = hit.region;
     if (!r) return;
@@ -637,6 +709,11 @@ export class VRPalette {
     const fy = Math.min(1, Math.max(0, (hit.py - r.y) / r.h));
     if (r.type === 'scale') {
       set({ capScale: Math.round((CAP_SCALE[0] + fx * (CAP_SCALE[1] - CAP_SCALE[0])) * 20) / 20 });
+      return;
+    }
+    if (r.type === 'sizeRange') {
+      const [a, b] = sizedTool(r.id).range, v = Math.round((a + fx * (b - a)) * 100) / 100;
+      if (v !== toolSize(r.id)) set({ brushSizes: { ...state.brushSizes, [r.id]: v } });
       return;
     }
     if (r.type === 'sv') { this.s = fx; this.v = 1 - fy; }

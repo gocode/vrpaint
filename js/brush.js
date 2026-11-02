@@ -7,6 +7,7 @@ import { touchPressure } from './scraper.js';
 // sa réserve de peinture, qui s'épuise en peignant : au bout du trait, les poils
 // se vident l'un après l'autre et le trait se casse en traînées sèches.
 // Le pinceau se recharge quand on le décolle du mur un instant (on le retrempe).
+// Option « Charge réaliste » décochée : la réserve ne baisse pas, le trait reste plein.
 // Le pinceau plat a une tranche : sa largeur suit le poignet. Large en travers
 // du geste, il couvre une bande ; de chant, il trace un filet.
 export const BRUSHES = [
@@ -20,9 +21,11 @@ export function brushById(id) {
   return BRUSHES.find(b => b.id === id) || null;
 }
 
-// Taille choisie (diamètre ou largeur, m) ; sizes : state.brushSizes
+// Taille choisie (diamètre ou largeur, m) ; sizes : state.brushSizes. Un outil a des
+// tailles fixes (sizes) ou une plage continue (range, taille par défaut size).
 export function brushSize(tool, sizes) {
   const v = sizes?.[tool.id];
+  if (tool.range) return v >= tool.range[0] && v <= tool.range[1] ? v : tool.size;
   return tool.sizes.includes(v) ? v : tool.sizes[1];
 }
 
@@ -119,8 +122,10 @@ export class Brush {
     return [size / 2 * (0.88 + 0.12 * p), Math.max(0.001, size * 0.07 * (0.35 + 0.65 * p))];
   }
 
-  // input : { origin, dir, right, up, pressure } + en VR { reach, trigger }
-  update(dt, input, tool, size, paint) {
+  // input : { origin, dir, right, up, pressure } + en VR { reach, trigger } ;
+  // realistic : la charge s'épuise le long du trait (sinon le pinceau reste plein)
+  update(dt, input, tool, size, paint, realistic = true) {
+    this.realistic = realistic;
     const hit = input && tool ? this.project(input.origin, input.dir, input.right, input.up) : null;
     this.hit = hit;
     const p = hit ? touchPressure(hit, input, PRESS_DEPTH).p : 0;
@@ -143,7 +148,7 @@ export class Brush {
     }
     if (!this.stroking) {
       this.stroking = true;
-      if (this.offWall >= RELOAD) this.reload();
+      if (this.offWall >= RELOAD || !realistic) this.reload();
       this.dist = this.tuft.hairs.map(() => 0);
       this.run = this.tuft.hairs.map(() => 0);
       this.onStrokeStart?.();
@@ -222,7 +227,7 @@ export class Brush {
     const gate = THREE.MathUtils.smoothstep(vnoise(this.run[i] * h.freq + h.phase) + w * 1.3 - 1, 0, 0.12);
     const a = Math.min(0.95, h.alpha * (0.3 + 0.55 * Math.sqrt(p)) * (0.35 + 0.65 * w) * gate);
     if (a <= 0.004) return;
-    this.load[i] = Math.max(0, L - a * ds * DRAIN * (0.6 + 0.8 * p));
+    if (this.realistic) this.load[i] = Math.max(0, L - a * ds * DRAIN * (0.6 + 0.8 * p));
     S.push(x / S.width, y / S.height, a, 1, h.r, 0, 0, h.r, paint);
   }
 

@@ -3,11 +3,13 @@ import { PAINTS } from './palette.js';
 import { Spray } from './spray.js';
 import { PaintSurface } from './paint.js';
 import { World } from './world.js';
-import { state, set, subscribe, actions, currentCap, WALL_LIMITS } from './state.js';
+import { state, set, subscribe, actions, currentCap, WALL_LIMITS, toolSize } from './state.js';
 import { Stencils } from './stencils.js';
 import { Scraper, scraperById } from './scraper.js';
 import { Brush, brushById, brushSize } from './brush.js';
-import { Newspaper, NEWSPAPER } from './newspaper.js';
+import { Newspaper, NEWSPAPER, sizePaperMesh } from './newspaper.js';
+import { Torch, TORCH } from './torch.js';
+import { Sponge, SPONGE } from './sponge.js';
 import { DesktopControls } from './desktop.js';
 import { XRControls } from './xr.js';
 import { VRPalette } from './vrui.js';
@@ -98,11 +100,17 @@ const brush = new Brush({ project: (o, d, r, u) => spray.project(o, d, r, u) });
 brush.onStrokeStart = () => beginGesture('pinceau');
 const newspaper = new Newspaper({ project: (o, d, r, u) => spray.project(o, d, r, u) });
 newspaper.onStrokeStart = () => beginGesture('papier journal');
-spray.onDeposit = brush.onDeposit = (c, x, y, r) => newspaper.fresh.mark(c, x, y, r);
+// Éponge : elle pose la couleur en cours, comme les pinceaux
+const sponge = new Sponge({ project: (o, d, r, u) => spray.project(o, d, r, u) });
+sponge.onStrokeStart = () => beginGesture('éponge');
+spray.onDeposit = brush.onDeposit = sponge.onDeposit = (c, x, y, r) => newspaper.fresh.mark(c, x, y, r);
 for (const m of brush.meshes.values()) scene.add(m);
-scene.add(newspaper.mesh);
-const handTools = [scraper, brush, newspaper];
-const tools = { stencils, scraper, spray, brush, newspaper };
+scene.add(newspaper.mesh, sponge.mesh);
+// Chalumeau : il sèche la peinture fraîche (papier journal, coulures)
+const torch = new Torch({ project: (o, d, r, u) => spray.project(o, d, r, u), fresh: newspaper.fresh, spray });
+scene.add(torch.mesh, torch.glow);
+const handTools = [scraper, brush, sponge, newspaper, torch];
+const tools = { stencils, scraper, spray, brush, sponge, newspaper, torch };
 
 const audio = new SprayAudio();
 const palette = new VRPalette();
@@ -192,7 +200,7 @@ function readWall(w, h, zone = null) {
   const [x0, y0, x1, y1] = zone || [0, 0, WALL.width, WALL.height];
   const cam = new THREE.OrthographicCamera(x0 - WALL.width / 2, x1 - WALL.width / 2, y1, y0, 0.001, 0.1);
   cam.position.set(0, 0, WALL.z + 0.05);
-  const hidden = [world.cursor, world.can, stencils.group, ...scraper.meshes.values(), ...brush.meshes.values(), newspaper.mesh]
+  const hidden = [world.cursor, world.can, stencils.group, ...scraper.meshes.values(), ...brush.meshes.values(), sponge.mesh, newspaper.mesh, torch.mesh, torch.glow]
     .filter(o => o.visible);
   hidden.forEach(o => { o.visible = false; });
   const prev = renderer.getRenderTarget(), xrOn = renderer.xr.enabled;
@@ -522,7 +530,7 @@ async function exportAll() {
 
 const test = params.has('test') ? runTest({ set, state, PAINTS, world, WALL, params, readWall, stencils, wallCanvas, exportAll, history }) : null;
 window.__vrpaint = {
-  get surface() { return surface; }, spray, history, canvases, stencils, scraper, brush, newspaper, wallCanvas, exportAll,
+  get surface() { return surface; }, spray, history, canvases, stencils, scraper, brush, sponge, newspaper, torch, wallCanvas, exportAll,
   state, set, actions, world, renderer, readWall, resizeWall, desktop, rig, palette, spectator, xr,
 };
 
@@ -546,16 +554,20 @@ renderer.setAnimationLoop(() => {
   // outil relu à chaque pas : le test en change entre deux pas d'une même image
   const heldTool = () => {
     const br = brushById(state.tool);
-    return { scr: scraperById(state.tool), br, size: br && brushSize(br, state.brushSizes), paper: state.tool === NEWSPAPER.id };
+    const paper = state.tool === NEWSPAPER.id, sp = state.tool === SPONGE.id;
+    return { scr: scraperById(state.tool), br, size: br && brushSize(br, state.brushSizes), paper, paperSize: paper && toolSize(NEWSPAPER.id),
+      sp, spSize: sp && toolSize(SPONGE.id), fire: state.tool === TORCH.id };
   };
   // l'outil en main reçoit l'entrée ; les coulures continuent quoi qu'il arrive
   const step = (h, inp) => {
-    const { scr, br, size, paper } = heldTool();
+    const { scr, br, size, paper, paperSize, sp, spSize, fire } = heldTool();
     const sprayed = spray.update(h, state.tool === 'bombe' ? inp : null);
     const scraped = scraper.update(h, scr ? inp : null, scr);
-    const brushed = brush.update(h, br ? inp : null, br, size, state.paint);
-    const blotted = newspaper.update(h, paper ? inp : null);
-    return sprayed || scraped || brushed || blotted;
+    const brushed = brush.update(h, br ? inp : null, br, size, state.paint, state.realLoad);
+    const sponged = sponge.update(h, sp ? inp : null, spSize || undefined, state.paint, state.realLoad);
+    const blotted = newspaper.update(h, paper ? inp : null, paperSize || undefined);
+    torch.update(h, fire ? inp : null, toolSize(TORCH.id));
+    return sprayed || scraped || brushed || sponged || blotted;
   };
   let spraying;
   if (test) {
@@ -568,23 +580,30 @@ renderer.setAnimationLoop(() => {
   flushAll();
   world.update(dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera, renderer.getPixelRatio());
   audio.setSpray(spray.pressure, spray.cap);
-  // frottement : la lame crisse, le pinceau et le papier frôlent
-  const rub = brush.contact ? [brush.pressure * 0.3, brush.speed] : newspaper.contact ? [newspaper.pressure * 0.45, newspaper.speed]
-    : [scraper.pressure, scraper.speed];
+  // frottement : la lame crisse, le pinceau, l'éponge et le papier frôlent
+  const rub = brush.contact ? [brush.pressure * 0.3, brush.speed] : sponge.contact ? [sponge.pressure * 0.35, sponge.speed]
+    : newspaper.contact ? [newspaper.pressure * 0.45, newspaper.speed] : [scraper.pressure, scraper.speed];
   audio.setScrape(...rub);
+  audio.setTorch(torch.flame);
   audio.setTraffic(world.traffic.nearest(camera.getWorldPosition(_camPos)));
-  const { scr, br, size, paper } = heldTool();
+  const { scr, br, size, paper, paperSize, sp, spSize, fire } = heldTool();
   const aimed = state.aim && !!input && !test && !presenting;
   if (scr) world.updateCursor(scraper.hit, null, aimed, [scr.width / 2, 0.0025]);
   else if (br) world.updateCursor(brush.hit, null, aimed, brush.footprint(br, size, brush.contact ? brush.pressure : state.pressure));
-  else if (paper) world.updateCursor(newspaper.hit, null, aimed, [NEWSPAPER.radius * 0.7, NEWSPAPER.radius * 0.7]);
+  else if (sp) world.updateCursor(sponge.hit, null, aimed, [spSize * 0.4, spSize * 0.4]);
+  else if (paper) world.updateCursor(newspaper.hit, null, aimed, [paperSize * 0.35, paperSize * 0.35]);
+  else if (fire) world.updateCursor(torch.hit, null, aimed, [torch.radius, torch.radius]);
   else world.updateCursor(spray.hit, spray.cap, state.aim && !!input && !test && (!presenting || (spray.hit && spray.hit.t < 0.9)));
   const inHand = presenting || (!!input && !test);
   world.can.visible = inHand && state.tool === 'bombe';
   for (const [id, m] of scraper.meshes) m.visible = inHand && id === state.tool;
   for (const [id, m] of brush.meshes) m.visible = inHand && id === state.tool;
   if (br) brush.updateMesh(br, size, state.paint);
+  sponge.mesh.visible = inHand && sp;
+  if (sp) sponge.updateMesh(spSize, state.paint);
   newspaper.mesh.visible = inHand && paper;
+  if (paper) sizePaperMesh(newspaper.mesh, paperSize);
+  torch.mesh.visible = inHand && fire;
   world.updateLift(rig);
 
   if (dirty && !saving && !spraying && !spray.drips.length && performance.now() - lastPaint > 4000 && !test) saveCurrent();

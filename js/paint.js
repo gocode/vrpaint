@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { TILE, LAYERS as LAYER_DEFS, tileRect } from './history.js';
 import { MAX_MASKS, MASK_GLSL, packMasks } from './stencils.js';
-import { CRUMPLE_GLSL } from './newspaper.js';
+import { CRUMPLE_GLSL, FRESH_GLSL } from './newspaper.js';
+import { SPONGE_GLSL } from './sponge.js';
 
 let uidCounter = 0;
 
@@ -16,6 +17,13 @@ let uidCounter = 0;
 // trait, ce que ce trait a recouvert (l'état du mur au début du geste, repris
 // dans l'historique). Le raclage ramène la couche visible vers ce fond, puis,
 // en appuyant fort, ronge le fond lui-même jusqu'au mur nu.
+// Le fond glisse vers l'état d'avant le geste à proportion de la peinture que le
+// geste dépose : sous un voile léger, il reste presque celui d'avant. Une bascule
+// au moindre dépôt dessinait au papier et au grattoir le contour exact des tampons
+// de la bombe (des ronds nets), là où rien ne se voyait.
+// Il y glisse aussi à proportion de ce qui, dans la peinture recouverte, a déjà
+// pris (séchée au temps ou au chalumeau, voir newspaper.js) : sous un voile frais,
+// une couche sèche reste au fond, et le papier s'arrête sur elle.
 //
 // Caches : chaque toile a jusqu'à MAX_MASKS pochoirs, évalués analytiquement
 // dans le shader des tampons (net à toute résolution, rien à allouer).
@@ -24,11 +32,11 @@ let uidCounter = 0;
 // (motif de papier froissé, voir newspaper.js), mais ne touche jamais au fond.
 
 const STAMP_VERT = /* glsl */`
-attribute vec4 iA; // u, v, alpha (ou dose), dureté
+attribute vec4 iA; // u, v, alpha (ou dose), dureté (0 nuage, 1 gouttelette, 2 + pression : éponge)
 attribute vec4 iB; // axes de l'ellipse en mètres : a.xy, b.xy
 attribute vec4 iC; // couleur linéaire, rugosité
 attribute vec4 iD; // couleur émise, métal
-attribute vec4 iE; // buse projetée sur la toile (m) : x, y, distance (0 : pas de parallaxe)
+attribute vec4 iE; // buse projetée sur la toile (m) : x, y, distance (0 : pas de parallaxe) ; éponge : graine + sécheresse
 uniform vec2 uWall;
 varying vec2 vQ;
 varying vec2 vAH;
@@ -36,6 +44,7 @@ varying vec4 vC;
 varying vec4 vD;
 varying vec2 vP;
 varying vec3 vN;
+varying vec4 vS;
 void main() {
   vQ = position.xy * 2.0;
   vec2 off = vQ.x * iB.xy + vQ.y * iB.zw;
@@ -45,26 +54,31 @@ void main() {
   vD = iD;
   vP = uv * uWall;
   vN = iE.xyz;
+  // éponge : position sur sa face (m, repère de l'éponge), rayon (quad de 1,1 rayon : contour bosselé), graine
+  vS = vec4(vQ * vec2(length(iB.xy), length(iB.zw)), length(iB.xy) / 1.1, iE.w);
   gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const STAMP_FRAG = /* glsl */`
 uniform int uPass;
 uniform vec2 uWall;
-uniform sampler2D tPre;   // passe 3 : carreau d'avant le geste (atlas de l'historique)
-uniform vec4 uPre;        // uv surface → uv atlas : échelle, décalage
 varying vec2 vQ;
 varying vec2 vAH;
 varying vec4 vC;
 varying vec4 vD;
 varying vec2 vP;
 varying vec3 vN;
+varying vec4 vS;
 ${MASK_GLSL}
+${SPONGE_GLSL}
 void main() {
   float r2 = dot(vQ, vQ);
   if (r2 >= 1.0) discard;
   float a;
-  if (vAH.y > 0.5) {
+  if (vAH.y > 1.5) {
+    // éponge : graine entière, sécheresse en partie fractionnaire
+    a = vAH.x * spongeContact(vS.xy, vS.z, vAH.y - 2.0, fract(vS.w), floor(vS.w), uTexel);
+  } else if (vAH.y > 0.5) {
     // gouttelette : disque net antialiasé
     float r = sqrt(r2);
     float aa = max(fwidth(r), 1e-3);
@@ -75,13 +89,8 @@ void main() {
     a = 1.0 - exp(-vAH.x * g);
   }
   a *= maskOpen(vP, vN);
-  if (uPass == 3) {
-    // fond : là où ce trait dépose de la peinture, ce qu'il recouvre
-    if (a < 1.0 / 255.0) discard;
-    gl_FragColor = texture2D(tPre, vP / uWall * uPre.xy + uPre.zw);
-    return;
-  }
-  if (uPass == 0) gl_FragColor = vec4(vC.rgb * a, a);
+  if (uPass == 3) gl_FragColor = vec4(a, 0.0, 0.0, a);   // couverture du lot (fond)
+  else if (uPass == 0) gl_FragColor = vec4(vC.rgb * a, a);
   else if (uPass == 1) gl_FragColor = vec4(vC.a * a, vD.a * a, 0.0, a);
   else gl_FragColor = vec4(vD.rgb * a, a);
 }`;
@@ -144,7 +153,7 @@ void main() {
 const BLOT_VERT = /* glsl */`
 attribute vec4 jA;   // centre x, y (m), cos, sin de la rotation du papier
 attribute vec4 jB;   // rayon (m), graine, pression d'avant, pression
-attribute vec4 jC;   // force (fraîcheur, appui ou frottement), plis par mètre, roulement (m, repère du papier)
+attribute vec4 jC;   // force (appui, appui prolongé ou frottement), plis par mètre, roulement (m, repère du papier)
 uniform vec2 uWall;
 varying vec2 vP;
 varying vec2 vL;
@@ -166,13 +175,16 @@ varying vec4 vB;
 varying vec4 vC;
 ${MASK_GLSL}
 ${CRUMPLE_GLSL}
+${FRESH_GLSL}
 void main() {
   vec2 Q = vL - vC.zw;   // position dans le contact (la boule est bombée : le centre touche d'abord)
   float r2 = dot(Q, Q) / (vB.x * vB.x);
   if (r2 >= 1.0) discard;
-  float Hd = crumple(vL, vB.y, vC.y) - 0.6 * r2;
-  float fw = max(length(vec2(dFdx(Hd), dFdy(Hd))), 1e-4);   // pente par texel
-  float e1 = vC.x * blotLift(vB.w, Hd, fw), e0 = vC.x * blotLift(vB.z, Hd, fw);
+  float Hd = crumple(vL, vB.y, vC.y) - 0.3 * crumpleBulge(Q, vB.x, vB.y);
+  // pente par texel, bornée : au bord de deux pans, la hauteur saute (elle n'y a pas de pente)
+  float fw = clamp(length(vec2(dFdx(Hd), dFdy(Hd))), 1e-4, 0.1);
+  float k = vC.x * wetAt(vP);   // la peinture fraîche part, la sèche presque plus
+  float e1 = k * blotLift(vB.w, Hd, fw), e0 = k * blotLift(vB.z, Hd, fw);
   float e = clamp(1.0 - (1.0 - e1) / max(1.0 - e0, 1e-3), 0.0, 1.0);
   gl_FragColor = vec4(0.0, 0.0, 0.0, e * maskOpen(vP, vec3(0.0)));
 }`;
@@ -221,6 +233,37 @@ void main() {
 
 const ZERO_FRAG = /* glsl */`
 void main() { gl_FragColor = vec4(0.0); }`;
+
+// Fond sous un lot de tampons de couverture c : fond·(1 − c) + avant·c, en deux
+// passes mélangées (KEEP multiplie, ADD ajoute). Avant : carreau du début du geste,
+// dans l'atlas de l'historique. Là où c = 0, le fond reste au bit près.
+const FOND_KEEP_FRAG = /* glsl */`
+uniform sampler2D tCov;
+varying vec2 vUv;
+void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, clamp(texture2D(tCov, vUv).r, 0.0, 1.0)); }`;
+
+const FOND_ADD_FRAG = /* glsl */`
+uniform sampler2D tCov;
+uniform sampler2D tSrc;
+uniform vec4 uPre;   // uv couche → uv atlas : échelle, décalage
+varying vec2 vUv;
+void main() { gl_FragColor = texture2D(tSrc, vUv * uPre.xy + uPre.zw) * clamp(texture2D(tCov, vUv).r, 0.0, 1.0); }`;
+
+// Part déjà prise de la peinture que recouvre le lot (carte de séchage de newspaper.js),
+// interpolée entre les centres des mailles : point de départ de la couverture du lot.
+const DRY_FRAG = /* glsl */`
+uniform sampler2D tSrc;
+uniform vec4 uDry;   // mailles en x, en y, taille d'une maille (m)
+uniform vec2 uWall;
+varying vec2 vUv;
+float dryCell(ivec2 c) { return texelFetch(tSrc, clamp(c, ivec2(0), ivec2(uDry.xy) - 1), 0).r; }
+void main() {
+  vec2 g = vUv * uWall / uDry.z - 0.5, w = fract(g);
+  ivec2 c = ivec2(floor(g));
+  float d = mix(mix(dryCell(c), dryCell(c + ivec2(1, 0)), w.x),
+                mix(dryCell(c + ivec2(0, 1)), dryCell(c + ivec2(1, 1)), w.x), w.y);
+  gl_FragColor = vec4(d, 0.0, 0.0, d);
+}`;
 
 // Changement de taille du mur : chaque trait garde sa position dans le monde.
 const RESAMPLE_FRAG = /* glsl */`
@@ -286,7 +329,6 @@ export class PaintSurface {
     };
     const stampUniforms = {
       uWall: { value: new THREE.Vector2(width, height) }, uPass: { value: 0 },
-      tPre: { value: null }, uPre: { value: new THREE.Vector4(1, 1, 0, 0) },
       ...this.maskUniforms,
     };
     this.stampMat = new THREE.ShaderMaterial({
@@ -303,11 +345,9 @@ export class PaintSurface {
       depthWrite: false,
       transparent: true,
     });
-    // fond : copie brute (sans mélange) de l'état d'avant le geste sous le trait
-    this.fondMat = new THREE.ShaderMaterial({
-      vertexShader: STAMP_VERT, fragmentShader: STAMP_FRAG, uniforms: stampUniforms,
-      blending: THREE.NoBlending, depthTest: false, depthWrite: false,
-    });
+    this.cover = null;   // couverture du lot en cours (fond), créée au premier lot
+    this.drySrc = null;  // carte de séchage en attente (voir queueDry)
+    this.dryTiles = new Set();
     this.stampScene = new THREE.Scene();
     this.stampMesh = new THREE.Mesh(geo, this.stampMat);
     this.stampMesh.frustumCulled = false;
@@ -362,7 +402,7 @@ export class PaintSurface {
     this.bgeo = bgeo;
     this.blotMat = new THREE.ShaderMaterial({
       vertexShader: BLOT_VERT, fragmentShader: BLOT_FRAG,
-      uniforms: { uWall: stampUniforms.uWall, ...this.maskUniforms },
+      uniforms: { uWall: stampUniforms.uWall, tFresh: { value: null }, uFresh: { value: new THREE.Vector4(1, 1, 1, 0) }, ...this.maskUniforms },
       blending: THREE.CustomBlending,
       blendEquation: THREE.AddEquation,
       blendSrc: THREE.ZeroFactor,
@@ -405,13 +445,26 @@ export class PaintSurface {
     };
     this.subMat = blendMat(THREE.ReverseSubtractEquation);
     this.addMat = blendMat(THREE.AddEquation);
+    // fond ← fond·(1 − c) + avant·c
+    this.fondKeepMat = quadMat(FOND_KEEP_FRAG);
+    Object.assign(this.fondKeepMat, {
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendEquationAlpha: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+    });
+    this.fondAddMat = blendMat(THREE.AddEquation);
+    this.fondAddMat.fragmentShader = FOND_ADD_FRAG;
+    for (const m of [this.fondKeepMat, this.fondAddMat]) m.uniforms.tCov = { value: null };
+    this.fondAddMat.uniforms.uPre = { value: new THREE.Vector4(1, 1, 0, 0) };
+    this.dryMat = quadMat(DRY_FRAG);
+    Object.assign(this.dryMat.uniforms, { uDry: { value: new THREE.Vector4(1, 1, 1, 0) }, uWall: stampUniforms.uWall });
 
     this._clearSet(this.targets);
   }
 
-  // mémoire GPU occupée (couche couleur avec ses mipmaps, couches matière, fond)
+  // mémoire GPU occupée (couche couleur avec ses mipmaps, couches matière, fond, couverture du lot)
   get bytes() {
-    return this.res[0] * this.res[1] * 8 * 2.33 + 4 * this.auxRes[0] * this.auxRes[1] * 8;
+    return this.res[0] * this.res[1] * (8 * 2.33 + 2) + 4 * this.auxRes[0] * this.auxRes[1] * 8;
   }
 
   get textures() {
@@ -430,6 +483,19 @@ export class PaintSurface {
     });
     if (mips) rt.texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     return rt;
+  }
+
+  // Couverture d'un lot de tampons (fond), à la taille de la couche couleur
+  _cover() {
+    const C = this.targets.color;
+    if (!this.cover || this.cover.width !== C.width || this.cover.height !== C.height) {
+      this.cover?.dispose();
+      this.cover = new THREE.WebGLRenderTarget(C.width, C.height, {
+        type: THREE.HalfFloatType, format: THREE.RedFormat, depthBuffer: false, stencilBuffer: false,
+        generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      });
+    }
+    return this.cover;
   }
 
   _makeSet() {
@@ -480,8 +546,9 @@ export class PaintSurface {
     this._end();
   }
 
-  // nx, ny, nt : buse projetée sur la toile (m) et sa distance, pour la parallaxe des caches
-  push(u, v, a, hard, ax, ay, bx, by, paint, nx = u * this.width, ny = v * this.height, nt = 0) {
+  // nx, ny, nt : buse projetée sur la toile (m) et sa distance, pour la parallaxe des caches ;
+  // seed : éponge (graine + sécheresse, voir sponge.js)
+  push(u, v, a, hard, ax, ay, bx, by, paint, nx = u * this.width, ny = v * this.height, nt = 0, seed = 0) {
     if (this.count >= this.max) this.flush();
     // carreaux couverts par le tampon (pour l'historique)
     const [W, H] = this.res;
@@ -496,7 +563,7 @@ export class PaintSurface {
     B[i] = ax; B[i + 1] = ay; B[i + 2] = bx; B[i + 3] = by;
     C[i] = c.r; C[i + 1] = c.g; C[i + 2] = c.b; C[i + 3] = paint.rough;
     D[i] = g.r; D[i + 1] = g.g; D[i + 2] = g.b; D[i + 3] = paint.metal;
-    E[i] = nx; E[i + 1] = ny; E[i + 2] = nt;
+    E[i] = nx; E[i + 1] = ny; E[i + 2] = nt; E[i + 3] = seed;
   }
 
   // Caches de la toile → uniformes (relus à chaque lot : impossible d'oublier une mise à jour)
@@ -537,9 +604,18 @@ export class PaintSurface {
     rt.scissorTest = false;
   }
 
+  // Peinture fraîche posée sur de la peinture déjà prise (src : carte de séchage, voir
+  // newspaper.js ; zone x0..x1, y0..y1 en m) : au prochain lot, cette part entre dans le fond.
+  queueDry(src, x0, y0, x1, y1) {
+    this.drySrc = src;
+    const [RW, RH] = this.res, set = new Set();
+    this._addTiles(set, x0 / this.width * RW, y0 / this.height * RH, x1 / this.width * RW, y1 / this.height * RH);
+    for (const k of set) { this.pending.add(k); this.dryTiles.add(k); }
+  }
+
   flush() {
     let n = 0;
-    if (this.count) n += this._flushStamps();
+    if (this.count || this.drySrc) n += this._flushStamps();
     if (this.scount || this.bcount) n += this._flushLift();
     return n;
   }
@@ -556,10 +632,29 @@ export class PaintSurface {
     this._syncMasks();
     const U = this.stampMat.uniforms, r = this.renderer;
     this._begin();
-    // 1. fond : sous le trait, l'état du mur au début du geste (gardé par l'historique)
+    // 1. fond : sous le trait, il glisse vers l'état du mur au début du geste (gardé par
+    //    l'historique) à proportion de la couverture c du lot : fond·(1 − c) + avant·c.
+    //    Lot après lot, c'est la couverture de tout le geste qui compte. La couverture part
+    //    de la part sèche d de la peinture recouverte : c = 1 − (1 − d)·(1 − tampons).
+    const dry = this.drySrc;
     if (this.history) {
-      this.stampMesh.material = this.fondMat;
+      const cov = this._cover(), keep = this.fondKeepMat, add = this.fondAddMat;
+      keep.uniforms.tCov.value = add.uniforms.tCov.value = cov.texture;
+      if (dry) {
+        dry.sync();
+        this.dryMat.uniforms.uDry.value.set(dry.gw, dry.gh, dry.cell, 0);
+      }
+      for (const key of tiles) {
+        const R = tileRect(this, key, LAYER_DEFS[0]);
+        if (R.w <= 0 || R.h <= 0) continue;
+        this._scissor(cov, R.x0, R.y0, R.w, R.h);
+        if (dry && this.dryTiles.has(key)) this._blit(this.dryMat, dry.tex, cov);
+        else this._blit(this.zeroMat, null, cov);
+        this._unscissor(cov);
+      }
       U.uPass.value = 3;
+      r.setRenderTarget(cov);
+      r.render(this.stampScene, this.cam);
       for (const key of tiles) {
         const slot = this.history.slotOf(this, key);
         if (!slot) continue;
@@ -567,17 +662,20 @@ export class PaintSurface {
           const R = tileRect(this, key, L, slot);
           if (R.w <= 0 || R.h <= 0) continue;
           const fond = this.targets[FOND[L.key]];
-          U.tPre.value = R.atlas.texture;
-          U.uPre.value.set(fond.width / R.atlas.width, fond.height / R.atlas.height,
+          add.uniforms.uPre.value.set(fond.width / R.atlas.width, fond.height / R.atlas.height,
             (R.ax - R.x0) / R.atlas.width, (R.ay - R.y0) / R.atlas.height);
           this._scissor(fond, R.x0, R.y0, R.w, R.h);
-          r.setRenderTarget(fond);
-          r.render(this.stampScene, this.cam);
+          this._blit(keep, null, fond);
+          this._blit(add, R.atlas.texture, fond);
           this._unscissor(fond);
         }
       }
-      U.tPre.value = null;
-      this.stampMesh.material = this.stampMat;
+      keep.uniforms.tCov.value = add.uniforms.tCov.value = add.uniforms.tSrc.value = this.dryMat.uniforms.tSrc.value = null;
+    }
+    if (dry) {
+      dry.done();
+      this.drySrc = null;
+      this.dryTiles.clear();
     }
     // 2. peinture visible
     SHOWN.forEach((k, pass) => {
@@ -619,6 +717,13 @@ export class PaintSurface {
     this.sAttr.set([-1, p0, 1, p0, 1, p1, -1, p1], q * 8);
     const [RW, RH] = this.res;
     this._addTiles(this.spending, x0 * RW - 2, y0 * RH - 2, x1 * RW + 2, y1 * RH + 2);
+  }
+
+  // Papier journal : carte de fraîcheur de la peinture de cette toile (voir newspaper.js)
+  setFreshness({ tex, gw, gh, cell, now }) {
+    const U = this.blotMat.uniforms;
+    U.tFresh.value = tex;
+    U.uFresh.value.set(gw, gh, cell, now);
   }
 
   // Papier journal : disque de rayon R (m) centré en (x, y), papier tourné de th ;
@@ -753,12 +858,13 @@ export class PaintSurface {
 
   dispose() {
     for (const k of LAYERS) this.targets[k].dispose();
+    this.cover?.dispose();
     this.disposed = true;
     this.geo.dispose();
     this.sgeo.dispose();
     this.bgeo.dispose();
-    for (const m of [this.stampMat, this.fondMat, this.scrapeMat, this.blotMat, this.copyMat, this.encodeMat, this.decodeMat,
-      this.zeroMat, this.resampleMat, this.subMat, this.addMat]) m.dispose();
+    for (const m of [this.stampMat, this.fondKeepMat, this.fondAddMat, this.scrapeMat, this.blotMat, this.copyMat, this.encodeMat, this.decodeMat,
+      this.zeroMat, this.resampleMat, this.subMat, this.addMat, this.dryMat]) m.dispose();
   }
 
   importLayers(layers) {

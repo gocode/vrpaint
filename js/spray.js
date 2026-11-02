@@ -225,6 +225,20 @@ export class Spray {
     }
   }
 
+  // Chalumeau : sous la flamme (disque x, y, r), la peinture fraîche sèche et
+  // ne coulera plus ; les coulures qui y passent se figent. k : chaleur × durée (s)
+  heat(canvas, x, y, r, k) {
+    const w = this.wetByCanvas.get(canvas);
+    if (w) {
+      const f = Math.exp(-k * 12), R2 = (r + WET_CELL) ** 2;
+      for (const i of w.cells) {
+        const cx = (i % w.gw + 0.5) * WET_CELL, cy = (Math.floor(i / w.gw) + 0.5) * WET_CELL;
+        if ((cx - x) ** 2 + (cy - y) ** 2 < R2) w.wet[i] *= f;
+      }
+    }
+    for (const d of this.drips) if (d.canvas === canvas && (d.x - x) ** 2 + (d.y - y) ** 2 < r * r) d.vol = 0;
+  }
+
   _dry(dt) {
     const k = Math.exp(-dt / DRY_TIME);
     for (const [canvas, w] of this.wetByCanvas) {

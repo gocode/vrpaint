@@ -1,5 +1,5 @@
 // Souffle de la bombe (bruit filtré), cliquetis de la bille quand on secoue,
-// crissement de la lame qui racle.
+// crissement de la lame qui racle, grondement du chalumeau.
 export class SprayAudio {
   constructor() {
     this.ctx = null;
@@ -61,6 +61,31 @@ export class SprayAudio {
     scr.connect(this.scrapeBand).connect(this.scrapeGain).connect(ctx.destination);
     scr.start(0, 1.3);
     this.scrapeLevel = 0;
+
+    // chalumeau : grondement sourd de la flamme
+    const fire = ctx.createBufferSource();
+    fire.buffer = buf;
+    fire.loop = true;
+    this.fireBand = ctx.createBiquadFilter();
+    this.fireBand.type = 'lowpass';
+    this.fireBand.frequency.value = 700;
+    this.fireBand.Q.value = 2;
+    this.fireGain = ctx.createGain();
+    this.fireGain.gain.value = 0;
+    fire.connect(this.fireBand).connect(this.fireGain).connect(ctx.destination);
+    fire.start(0, 0.4);
+    this.fireLevel = 0;
+  }
+
+  // flamme du chalumeau (gâchette 0..1)
+  setTorch(flame) {
+    if (!this.ctx) return;
+    const target = flame > 0.05 ? 0.12 + 0.3 * flame : 0;
+    if (Math.abs(target - this.fireLevel) < 0.005) return;
+    this.fireLevel = target;
+    const t = this.ctx.currentTime;
+    this.fireGain.gain.setTargetAtTime(target, t, 0.04);
+    this.fireBand.frequency.setTargetAtTime(450 + 600 * flame, t, 0.06);
   }
 
   // pression 0..1 de la lame sur le mur, vitesse (m/s)

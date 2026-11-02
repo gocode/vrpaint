@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { state, set, subscribe, actions, setTool, CAP_SCALE } from './state.js';
+import { state, set, subscribe, actions, setTool, CAP_SCALE, sizedTool, toolSize } from './state.js';
 import { scraperById } from './scraper.js';
 import { PAINTS } from './palette.js';
 import { MASK_SIZE } from './stencils.js';
 import { brushById, brushSize, brushReach } from './brush.js';
-import { NEWSPAPER } from './newspaper.js';
+import { NEWSPAPER, paperReach } from './newspaper.js';
+import { TORCH } from './torch.js';
+import { SPONGE, spongeReach } from './sponge.js';
 
 const Y = new THREE.Vector3(0, 1, 0);
 const _q = new THREE.Quaternion();
@@ -22,10 +24,11 @@ const _f = new THREE.Vector3();
 //   racloirs : la lame racle quand elle touche le mur ; l'enfoncer (ou la
 //     gâchette) appuie plus fort ; vibrations selon la pression et la vitesse
 //   pinceaux, papier journal : de même au contact (poils pliés, boule écrasée)
+//   chalumeau : gâchette = flamme, à quelques centimètres du mur (vibre selon la chaleur)
 //   main de la palette : joystick = se déplacer, clic du joystick = se replacer face au mur,
 //     gâchette latérale maintenue = attraper le monde et le tirer (déplacement fin, hauteur comprise),
 //     gâchette maintenue + joystick : ↑↓ = largeur du jet (taille du cache avec les caches,
-//     taille suivante avec un pinceau),
+//     taille suivante avec un pinceau ou le papier journal),
 //     ←→ = couleur précédente / suivante ; X = masquer la palette, Y = jour/nuit
 export class XRControls {
   constructor({ renderer, rig, camera, palette, world, audio, wall, tools }) {
@@ -166,19 +169,28 @@ export class XRControls {
   _tune(pal, x, y, dt) {
     const pg = pal.src.gamepad;
     if (pal.fineTool !== state.tool) { pal.fine = undefined; pal.fineTool = state.tool; }
-    const brush = brushById(state.tool);
-    if (brush || scraperById(state.tool) || state.tool === NEWSPAPER.id) {
-      // tailles fixes (pinceaux) ou aucune (racloirs, papier) : ↑↓ par crans, une taille par poussée
+    const sized = sizedTool(state.tool);
+    if (sized || scraperById(state.tool)) {
+      // tailles fixes (pinceaux), continues (éponge, papier, flamme) ou aucune (racloirs) : ↑↓ par crans, une taille par poussée
       if (Math.abs(y) > 0.7 && Math.abs(x) < 0.5 && !pal.sizeSnap) {
         pal.sizeSnap = true;
-        if (brush) {
-          const i = brush.sizes.indexOf(brushSize(brush, state.brushSizes));
-          const j = THREE.MathUtils.clamp(i - Math.sign(y), 0, brush.sizes.length - 1);
-          if (j !== i) {
-            set({ brushSizes: { ...state.brushSizes, [brush.id]: brush.sizes[j] } });
+        if (sized?.range) {
+          // taille continue (éponge, papier, flamme) : ×1,25 par poussée, au centimètre
+          const cur = toolSize(sized.id);
+          const v = THREE.MathUtils.clamp(Math.round(cur * (y < 0 ? 1.25 : 0.8) * 100) / 100, ...sized.range);
+          if (v !== cur) {
+            set({ brushSizes: { ...state.brushSizes, [sized.id]: v } });
             this.pulse(pg, 0.15, 15);
           }
-          this.palette.flash(`${brush.name} : ${Math.round(brush.sizes[j] * 1000) / 10} cm`.replace('.', ','));
+          this.palette.flash(`${sized.label} : ${Math.round(v * 100)} cm`);
+        } else if (sized) {
+          const i = sized.sizes.indexOf(toolSize(sized.id));
+          const j = THREE.MathUtils.clamp(i - Math.sign(y), 0, sized.sizes.length - 1);
+          if (j !== i) {
+            set({ brushSizes: { ...state.brushSizes, [sized.id]: sized.sizes[j] } });
+            this.pulse(pg, 0.15, 15);
+          }
+          this.palette.flash(`${sized.name} : ${Math.round(sized.sizes[j] * 1000) / 10} cm`.replace('.', ','));
         } else this.palette.flash('Pas de taille à régler pour cet outil');
       } else if (Math.abs(y) < 0.3) pal.sizeSnap = false;
     } else if (Math.abs(y) > 0.2 && Math.abs(x) < 0.5) {
@@ -219,7 +231,8 @@ export class XRControls {
       const tuning = (pg.buttons[0]?.value || 0) > 0.5;
       if (tuning) this._tune(pal, x, y, dt);
       else {
-        pal.tuneSnap = false;
+        // gâchette lâchée (même joystick encore poussé) : les crans se réarment
+        pal.tuneSnap = pal.sizeSnap = false;
         if (Math.hypot(x, y) > 0.15) this.move(x, y, dt);
       }
       this._grabWorld(pal);
@@ -296,10 +309,12 @@ export class XRControls {
     if (this.mode === 'ui') return null;
     const tool = scraperById(state.tool);
     if (tool) return this._scraperMode(gp, inp, tool, this.mode === 'spray' ? trig : 0);
-    if (brushById(state.tool) || state.tool === NEWSPAPER.id) return this._contactMode(gp, inp, this.mode === 'spray' ? trig : 0);
+    if (brushById(state.tool) || state.tool === SPONGE.id || state.tool === NEWSPAPER.id) return this._contactMode(gp, inp, this.mode === 'spray' ? trig : 0);
     inp.reach = 0;
     inp.pressure = this.mode === 'spray' ? trig : 0;
-    if (inp.pressure > 0.05) this.pulse(gp, 0.05 + 0.15 * inp.pressure, 30);
+    // chalumeau : grondement continu, plus fort quand la flamme chauffe le mur
+    if (state.tool === TORCH.id) { if (inp.pressure > 0.05) this.pulse(gp, 0.04 + 0.1 * inp.pressure + 0.25 * this.tools.torch.heat, 30); }
+    else if (inp.pressure > 0.05) this.pulse(gp, 0.05 + 0.15 * inp.pressure, 30);
     return inp;
   }
 
@@ -351,27 +366,28 @@ export class XRControls {
       hit && { shape: state.maskShape, x: hit.x, y: hit.y, r: state.maskSize, rot: roll, lift: state.maskLift });
   }
 
+  // Outils tenus au bout du rayon de la main de la bombe (hors bombe et racloirs)
   _contactMeshes() {
-    return [...this.tools.brush.meshes.values(), this.tools.newspaper.mesh];
+    return [...this.tools.brush.meshes.values(), this.tools.sponge.mesh, this.tools.newspaper.mesh, this.tools.torch.mesh];
   }
 
-  // Pinceaux et papier journal : comme les racloirs, au contact du mur. Les
-  // poils (la boule de papier) reculent dans la main au lieu de traverser.
+  // Pinceaux, éponge et papier journal : comme les racloirs, au contact du mur. Les
+  // poils (l'éponge, la boule de papier) reculent dans la main au lieu de traverser.
   _contactMode(gp, inp, trig) {
-    const br = brushById(state.tool);
-    const sim = br ? this.tools.brush : this.tools.newspaper;
-    const reach = br ? brushReach(br, brushSize(br, state.brushSizes)) : NEWSPAPER.reach;
+    const br = brushById(state.tool), sp = state.tool === SPONGE.id;
+    const sim = br ? this.tools.brush : sp ? this.tools.sponge : this.tools.newspaper;
+    const reach = br ? brushReach(br, brushSize(br, state.brushSizes)) : sp ? spongeReach(toolSize(SPONGE.id)) : paperReach(toolSize(NEWSPAPER.id));
     inp.reach = reach;
     inp.trigger = trig;
     inp.pressure = 0;
     const h = this.tools.spray.project(inp.origin, inp.dir, inp.right, inp.up);
     const mesh = br ? sim.meshes.get(br.id) : sim.mesh;
     mesh.position.set(0, 0, h ? THREE.MathUtils.clamp(reach - h.t, 0, 0.1) : 0);
-    // vibrations : le pinceau frôle (doux, continu) ; le papier crisse à l'appui
+    // vibrations : le pinceau frôle (doux, continu), l'éponge s'écrase (mou) ; le papier crisse à l'appui
     if (sim.contact) {
       const v = Math.min(1, sim.speed / 0.3);
-      if (performance.now() - (sim.touched || 0) < 40) this.pulse(gp, br ? 0.25 : 0.5, 18);
-      else if (br) this.pulse(gp, (0.04 + 0.2 * sim.pressure) * (0.4 + 0.6 * v), 25);
+      if (performance.now() - (sim.touched || 0) < 40) this.pulse(gp, br ? 0.25 : sp ? 0.3 : 0.5, 18);
+      else if (br || sp) this.pulse(gp, (0.04 + 0.2 * sim.pressure) * (0.4 + 0.6 * v), 25);
       else this.pulse(gp, (0.05 + 0.35 * sim.pressure) * (0.2 + 0.8 * v) * (0.6 + 0.8 * Math.random()), 25);
     }
     return inp;

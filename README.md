@@ -9,8 +9,10 @@ Aucune installation ni compilation : du HTML/JavaScript servi par WAMP, Three.js
 - **Test automatique** (peinture scriptée, sans casque) : http://localhost/VRpaint/?test (ou `?test=night`)
 - **Test des caches et du raclage** : http://localhost/VRpaint/?test=caches (fond bleu, caches superposés, aplat rouge,
   retrait des caches, raclage au couteau, à la spatule et au grattoir, puis contrôles d'annulation exacte)
-- **Test du papier journal et des pinceaux** : http://localhost/VRpaint/?test=outils (fond bleu sec, rouge par-dessus,
-  appuis et frottement au papier journal, traits de pinceau rond et plat, puis annulation exacte et enregistrement ;
+- **Test du papier journal, du chalumeau, des pinceaux et de l'éponge** : http://localhost/VRpaint/?test=outils (fond bleu
+  sec, rouge par-dessus, appuis et frottement au papier journal, chalumeau (flamme moyenne et grande flamme), traits de
+  pinceau rond et plat, appuis et frottement à l'éponge, charge réaliste cochée puis décochée, puis annulation exacte et
+  enregistrement ;
   lignes `VRPAINT_OUTILS_…` dans la console). Contrôle complet, en headless : `node tests/outils.mjs`
   (voir [Pinceaux et papier journal](#pinceaux-et-papier-journal)).
 - Paramètre `?res=2048|3072|4096` pour forcer la résolution du mur (par défaut 4096 sur PC, 3072 sur Quest).
@@ -104,7 +106,7 @@ depuis GitHub Pages ; la diffusion native fait le même travail sans coût pour 
 | Se déplacer | joystick gauche |
 | Déplacement fin (hauteur comprise) | gâchette latérale (grip) gauche maintenue : la main « attrape » le monde, on le tire |
 | Se replacer face au mur, à 85 cm | clic du joystick gauche |
-| Largeur du jet sans viser la palette | gâchette gauche maintenue + joystick gauche ↑ ↓ (par crans de 5 % ; avec les caches : taille du prochain cache ; avec un pinceau : taille suivante, un cran par poussée) |
+| Largeur du jet sans viser la palette | gâchette gauche maintenue + joystick gauche ↑ ↓ (par crans de 5 % ; avec les caches : taille du prochain cache ; avec un pinceau : taille suivante, un cran par poussée ; avec l'éponge, le papier journal ou le chalumeau : éponge, boule ou flamme 25 % plus grosse ou plus petite par poussée) |
 | Couleur précédente / suivante | gâchette gauche maintenue + joystick gauche ← → (le nom s'affiche en haut de la palette) |
 | Tourner par crans de 30° | joystick droit ← → |
 | Monter / descendre (nacelle) | joystick droit ↑ ↓ (jusqu'à hauteur du mur − 1,2 m) |
@@ -126,12 +128,29 @@ depuis GitHub Pages ; la diffusion native fait le même travail sans coût pour 
 cours. Plus on les plie « dans » le mur (jusqu'à 3 cm), plus le pinceau s'écrase et charge le trait ; la gâchette ajoute
 de la pression au contact. La tranche du pinceau plat suit le poignet : à plat en travers du geste, il couvre une bande ;
 de chant, il trace un filet. La charge s'épuise le long du trait ; décoller le pinceau du mur une demi-seconde le
-recharge. Taille : onglet **Outils** (rond : 1, 2,5 ou 5 cm ; plat : 2, 4 ou 8 cm).
+recharge. Option **Charge réaliste** (onglet **Réglages**, cochée par défaut) : décochée, le pinceau reste toujours plein
+et le trait ne pâlit plus. Taille : onglet **Outils** (rond : 1, 2,5 ou 5 cm ; plat : 2, 4 ou 8 cm).
 
-**Papier journal** : une boule de papier froissé au bout de la manette. La presser contre le mur (tamponner) ou la
-frotter emporte une fine couche de la peinture fraîche ou récente ; l'écraser davantage (jusqu'à 3,5 cm) élargit le
-contact. À chaque nouvel appui, le papier a tourné et s'est re-froissé : le motif change. Vibrations : un petit choc
-à l'appui, puis un grain en frottant.
+**Éponge** : une éponge naturelle au bout de la manette (de 3 à 20 cm de diamètre, 8 par défaut, réglée à la barre de
+l'onglet **Outils**), chargée de la couleur en cours. La tamponner sur le mur pose un grain poreux : des îlots de
+peinture percés de pores, différents à chaque appui. L'écraser (jusqu'à 3 cm) ou presser la gâchette étend le contact ;
+la frotter étale la peinture en stries. Elle se vide d'un appui à l'autre (5 à 6 appuis) ; écartée du mur une seconde,
+elle est rechargée. Avec **Charge réaliste** décochée, elle reste toujours pleine. Vibrations : un appui mou, puis un
+léger grain en frottant.
+
+**Papier journal** : une boule de papier froissé au bout de la manette (de 5 à 30 cm de diamètre, 11 par défaut, réglée à la barre de l'onglet **Outils**). La
+presser contre le mur (tamponner) ou la frotter emporte la peinture fraîche par éclats anguleux ; rester appuyé en
+emporte davantage (le papier boit, et s'aplatit un peu) ; l'écraser davantage (jusqu'à 3,5 cm) élargit le contact. La
+peinture sèche ne part presque plus. À chaque nouvel appui, le papier a tourné et s'est re-froissé : le motif change.
+Vibrations : un petit choc à l'appui, puis un grain en frottant.
+
+**Chalumeau** : la gâchette allume la flamme. Tenue à quelques centimètres du mur (25 cm au plus avec la flamme
+moyenne), elle sèche la peinture fraîche sous elle : le papier journal ne l'emporte plus, et elle ne coule plus (les
+coulures qui passent sous la flamme se figent). Plus près, la flamme chauffe plus fort ; plus loin, plus large. La
+taille de la flamme se règle à la barre de l'onglet **Outils** (de 3 à 30 cm de zone chauffée au contact, 6 par
+défaut) : une grande flamme sèche d'un coup une grande surface, aussi vite qu'une petite, et porte plus loin (de 18 à
+50 cm). Une lueur orangée montre la zone chauffée ; la manette gronde d'autant plus que le mur chauffe. Le chalumeau ne
+pose ni n'enlève de peinture.
 
 **Racloirs** (couteau, spatule, grattoir) : la lame dépasse de la manette. Elle racle dès qu'elle touche le mur ; plus on
 l'enfonce « dans » le mur (jusqu'à 3 cm), plus on appuie. La gâchette ajoute de la pression au contact. Le fil de la lame
@@ -142,18 +161,21 @@ vitesse. L'outil recule dans la main au lieu de traverser le mur.
 Palette à 6 onglets :
 - **Couleurs** : le nuancier ;
 - **Perso** : teinte, finition, Enregistrer, Mes couleurs ;
-- **Outils** : en haut ce qui pose la peinture (bombe, pinceau rond, pinceau plat, caches : forme, taille,
-  décollement, tout retirer), en bas ce qui l'enlève (couteau, spatule, grattoir, papier journal) ; tailles des pinceaux ;
+- **Outils** : en haut ce qui pose la peinture (bombe, pinceau rond, pinceau plat, éponge, caches : forme, taille,
+  décollement, tout retirer), puis ce qui l'enlève (couteau, spatule, grattoir, papier journal) et le chalumeau ; tailles
+  des pinceaux, barres de taille de l'éponge, de la boule de papier et de la flamme ;
 - **Modèle** : choisir la photo de référence, l'afficher à gauche, à droite ou au-dessus de la palette, ou sur un chevalet près du mur, et régler sa taille. Les photos s'ajoutent depuis le panneau du navigateur, avant d'entrer en VR ;
-- **Réglages** : annuler, effacer, nuit, coulures, projections, viseur, main droite/gauche, type et taille du mur ;
+- **Réglages** : annuler, effacer, nuit, coulures, projections, charge réaliste, viseur, main droite/gauche, type et
+  taille du mur ;
 - **Projets** : nouveau, enregistrer, ouvrir (les projets du PC, communs au PC et au casque).
 
 Les caps et le potentiomètre de largeur restent visibles en bas, quel que soit l'onglet, comme **Quitter la VR** en haut.
 `node tests/casque.mjs` vérifie, sur une séance et des manettes simulées :
 - que ce bouton est présent sur chaque onglet, qu'un appui seul ne quitte pas et que la sortie rend bien la page du navigateur ;
-- que sur aucun onglet deux zones de la palette ne se chevauchent ;
-- les commandes de la main gauche ;
-- l'option Projections.
+- que sur aucun onglet deux zones de la palette ne se chevauchent (l'onglet Réglages, passé à quatre rangées de boutons
+  avec « Charge réaliste », a été resserré pour ne pas descendre sur les caps) ;
+- les commandes de la main gauche, dont la taille de l'éponge et de la flamme ;
+- les options Projections et Charge réaliste.
 
 Palette nette : le canvas est rendu à pleine définition (1024 × 1600) avec un filtrage anisotrope ×16, car le pupitre
 est vu en biais. La fovéation fixe est descendue de 0,6 à 0,3 : la palette, tenue bas devant soi, tombait dans le bord
@@ -168,10 +190,18 @@ Ctrl+Z : annuler · N : nuit · V : viseur · C : coulures · X : secouer.
 Clic sur la pastille de la couleur en cours : éditeur de couleur perso. Clic droit sur une couleur de « Mes couleurs » : la retirer.
 
 Outils : B = bombe · P = pinceau rond ⇄ plat · M = caches · R = racloir suivant (couteau, spatule, grattoir) ·
-J = papier journal, ou la section **Outil** du panneau.
+G = éponge · J = papier journal · T = chalumeau, ou la section **Outil** du panneau.
 - Pinceaux : glisser sur le mur · molette = pression (le rond s'écrase et s'élargit) · Maj + molette = angle du pinceau
   plat (curseur « Angle ») · taille dans le panneau. Relâcher un instant recharge le pinceau.
-- Papier journal : clic = tamponner, glisser = frotter · molette = pression. Chaque clic est un nouveau froissage.
+- Éponge : clic = tamponner, glisser = frotter · molette = pression · taille à la barre du panneau. Lâcher une seconde
+  la recharge.
+- Charge réaliste : case de la section **Mur et ambiance** ; décochée, pinceaux et éponge restent pleins.
+- Après un clic sur une case ou une barre du panneau, les lettres restent des raccourcis (la case ou la barre ne garde
+  que l'espace et les flèches) ; un champ de texte, lui, garde toutes ses touches.
+- Papier journal : clic = tamponner (garder le bouton enfoncé : il boit davantage), glisser = frotter · molette = pression ·
+  taille de la boule dans le panneau. Chaque clic est un nouveau froissage.
+- Chalumeau : clic maintenu = flamme · molette = distance au mur · taille de la flamme à la barre du panneau (portée de
+  25 cm pour la flamme de 6 cm, jusqu'à 50 cm pour une grande flamme).
 - Caches : clic sur le mur = poser (glisser avant de lâcher pour le placer) · clic sur un cache = le déplacer ·
   molette sur un cache = taille · Maj + molette = rotation · Suppr = le retirer. Sans cache sous le pointeur, la molette
   règle la taille du prochain cache et Maj + molette son angle.
@@ -184,7 +214,7 @@ Chaque geste a un seul rôle, pour qu'aucun ne déclenche l'autre :
 |---|---|
 | **Un doigt** | peindre (avec les caches : poser ou déplacer un cache ; avec un racloir : racler ; avec le papier journal : tamponner, ou frotter en glissant). Une tape brève fait un point. |
 | **Deux doigts qui glissent** | regarder autour : on « attrape » le décor, qui suit les doigts (glisser vers le bas lève la tête). |
-| **Pincer / écarter** | largeur du jet de la bombe (30 à 250 %), avec une bulle « Jet 120 % · ≈ 18 cm » et l'anneau du viseur qui suit. Avec les caches : taille du cache touché, et en tournant les doigts son angle (sans cache sous les doigts : taille du prochain). Avec un racloir, un pinceau ou le papier journal : pression. |
+| **Pincer / écarter** | largeur du jet de la bombe (30 à 250 %), avec une bulle « Jet 120 % · ≈ 18 cm » et l'anneau du viseur qui suit. Avec les caches : taille du cache touché, et en tournant les doigts son angle (sans cache sous les doigts : taille du prochain). Avec un racloir, un pinceau, l'éponge ou le papier journal : pression. Avec le chalumeau : distance de la flamme au mur. |
 | **Croix en bas à gauche** | avancer, reculer, se décaler, y compris en diagonale. Elle est progressive : plus le pouce s'éloigne du centre, plus on va vite. |
 | **⤒ ⤓** | monter, descendre la nacelle. |
 
@@ -256,9 +286,17 @@ node tests/tactile.mjs
   dessous jusqu'au mur nu, avec des éclats et des rayures. Les stries suivent la lame ; l'efficacité dépend de
   l'angle de la lame sur le mur et de sa direction par rapport au geste.
   Stratification retenue : chaque surface a, en plus des couches visibles, une couche **« fond »**. À chaque trait,
-  là où il dépose de la peinture, le fond reçoit ce que ce trait recouvre : l'état du mur au début du geste, que
-  l'historique a de toute façon copié. Racler ramène donc la couche visible vers ce qu'il y avait juste dessous, au
-  texel près, sans découpage par carreau. Tout se fait automatiquement, sans bouton « figer ».
+  le fond glisse vers ce que ce trait recouvre (l'état du mur au début du geste, que l'historique a de toute façon
+  copié), à proportion de la peinture déposée : sous un aplat, c'est exactement la couche d'avant ; sous un voile
+  léger, le fond reste presque celui d'avant. Racler ramène donc la couche visible vers ce qu'il y avait juste
+  dessous, au texel près, sans découpage par carreau. Tout se fait automatiquement, sans bouton « figer ».
+  Le fond basculait autrefois dès le moindre dépôt (1/255) : le papier et le grattoir dessinaient alors, là où rien
+  ne se voyait, le contour exact des tampons de la bombe (des ronds nets). Les murs peints avant cette correction
+  gardent ce fond ; tout nouveau trait est juste.
+  Le fond glisse aussi vers ce que le trait recouvre à proportion de ce qui, dans cette peinture, a déjà pris
+  (séché au temps ou au chalumeau, d'après la carte de fraîcheur du papier) : sous un voile frais, même léger, une
+  couche sèche reste au fond. Sans cela, le voile remettait à neuf la fraîcheur de toute la maille, et le papier
+  buvait la couche sèche du dessous jusqu'au mur.
   Options écartées :
   - une épaisseur par texel : elle sait combien retirer, pas quelle couleur révéler ;
   - un fond figé à chaque séance ou à la demande : il force à gérer les couches à la main, et figer tout le mur
@@ -277,20 +315,44 @@ node tests/tactile.mjs
     pinceau couvre presque entièrement. En se vidant, une mèche pâlit, puis ne touche plus que par endroits (bruit le
     long de son chemin) : le trait se casse en traînées sèches, mèche après mèche, sur 1 m environ. Décoller le
     pinceau du mur une demi-seconde le recharge (on le retrempe) ; changer de couleur aussi. La couleur des poils du
-    pinceau tenu en main pâlit avec la charge.
+    pinceau tenu en main pâlit avec la charge. Option **Charge réaliste** décochée : la réserve ne baisse plus, le trait
+    reste plein d'un bout à l'autre (et l'éponge aussi).
   - **Pression** : le pinceau rond s'écrase (de 30 % de son diamètre, la pointe, jusqu'au ventre entier). Le pinceau
     plat garde sa largeur, mais sa tranche épaissit.
   - **Tranche** : le pinceau plat est orienté par le poignet (par le curseur « Angle » à la souris). En travers du
     geste, il couvre une bande de toute sa largeur ; de chant, il trace un filet de quelques millimètres.
   - La peinture passe par les mêmes tampons que la bombe : les caches l'arrêtent, la couche « fond » garde ce qu'elle
     recouvre (le raclage et le papier journal le retrouvent), l'annulation est exacte.
-- **Papier journal froissé** : une boule de 11 cm. Pressée sur le mur, elle n'en touche que les crêtes.
-  - **Motif** : le papier est modélisé comme un relief plan par morceaux. Chaque pli est une cellule de Voronoi
-    (environ 2,5 cm) dont la hauteur est la distance aux arêtes de la cellule. Les cellules sont donc de petites
-    pyramides : des facettes planes séparées par des arêtes vives, comme un relief de montagnes vu du ciel. Deux
-    échelles de plis se superposent (2,5 cm et 1,1 cm) ; plus fins, les plis tomberaient sous la taille d'un texel du
-    mur. La boule est bombée : le contact part du centre. La pression abaisse le niveau de contact. Le bord du contact
-    est net, sur un texel, et chaque facette emporte plus ou moins selon sa pente : ce n'est pas un bruit flou.
+- **Éponge** : une éponge naturelle de 3 à 20 cm de diamètre (8 par défaut), réglée à la barre, chargée de la couleur en
+  cours.
+  - **Motif** : calculé dans le shader des tampons (un mode de plus, à côté du nuage et des gouttelettes), dans le
+    repère de l'éponge. Le relief de sa face (grandes bosses de 2 cm, grain de 6 mm) donne des îlots de contact aux
+    bords mous ; la face est bombée, le centre touche d'abord. Deux réseaux de pores ronds, de tailles inégales,
+    percent ces îlots de trous nets (bord sur un texel) ; leur maille vaut au moins 4,5 texels du mur, sinon ils se
+    trameraient en gris. Le contour est bosselé.
+  - **Chaque appui est différent** : nouvelle graine et rotation au hasard ; en VR, le motif tourne aussi avec le poignet.
+  - **Pression** : appuyer abaisse le seuil de contact (les îlots s'étendent et se rejoignent) et resserre les pores
+    (−35 % à pleine pression). Appuyer plus fort sur place repose le motif, à demi-dose.
+  - **Frotter** : un tampon tous les 3 mm (ou 4° de rotation), à faible dose ; le motif glisse avec l'éponge, ses pores
+    s'étirent en stries dans le sens du geste.
+  - **Charge** : un appui à pleine pression prend 18 % de la charge, et 1,4 par mètre frotté. Au-dessous de 60 %,
+    l'éponge pose moins et ne marque plus que ses bosses (le seuil de contact monte). Tenue loin du mur une seconde,
+    ou en changeant de couleur, elle est rechargée. Option **Charge réaliste** décochée : elle reste pleine. Elle
+    pâlit en main avec sa charge.
+  - Comme les pinceaux : caches respectés, couche « fond » tenue, peinture fraîche pour le papier journal, chaque appui
+    (et chaque frottement) s'annule d'un coup, au bit près.
+- **Papier journal froissé** : une boule de 5 à 30 cm de diamètre (11 par défaut), réglée à la barre. Pressée sur le mur, elle n'en touche que
+  les crêtes.
+  - **Motif** : le papier est modélisé comme un relief plan par morceaux. Chaque cellule de Voronoi est un pan plan, à
+    sa hauteur, incliné au hasard ; une partie des bords porte une arête en crête (un pli marqué, 2 à 3 mm). Deux
+    échelles se superposent (2,5 cm et 1 cm, tournées l'une par rapport à l'autre) ; leur somme reste plane par
+    morceaux, et le contact est fait d'éclats anguleux à bords droits et de fines lignes de plis, comme un relief de
+    montagnes vu du ciel. Plus fins, les plis tomberaient sous la taille d'un texel du mur. La boule est un polyèdre
+    bombé (7 faces au contour) : le contact part du centre. La pression abaisse le niveau de contact. Le bord du contact
+    est net, sur un texel ; les crêtes les plus hautes boivent un peu plus.
+  - **Durée d'appui** : un appui bref emporte l'essentiel de ce qu'il touche (sur de la peinture fraîche), en éclats francs ;
+    tant qu'on reste appuyé sans bouger, le motif est reposé toutes les 80 ms et boit le reste au taux de 1,2 par
+    seconde, et la boule s'aplatit (+30 % de pression en 2 s) : le contact s'étend.
   - **Chaque appui est différent** : à chaque nouvel appui, une nouvelle graine (un autre froissage) et une rotation au
     hasard ; en VR, le motif tourne aussi avec le poignet.
   - **Tamponner, appuyer, frotter** : appuyer plus fort sur place agrandit le contact, sans repasser sur ce qui est
@@ -299,11 +361,20 @@ node tests/tactile.mjs
     glisse à 20 % : d'autres plis viennent toucher, et la bande frottée est une mosaïque de facettes, pas des rayures.
   - **Fraîche ou récente** : le papier travaille comme le raclage, sur l'écart entre la couche visible et le « fond ».
     Il ramène la dernière couche vers ce qu'elle recouvrait, sans jamais toucher au fond : il montre les couches sèches
-    du dessous, jamais le mur. La peinture fraîche (posée il y a quelques secondes) part bien mieux que la peinture
-    récente, déjà prise. La fraîcheur vient d'une carte à mailles de 3 cm, tenue par la bombe et les pinceaux ; elle
-    n'est pas enregistrée, et un projet rouvert est sec.
+    du dessous, jamais le mur. La peinture fraîche part bien ; elle prend en quelques dizaines de secondes (constante
+    de 20 s), et sèche, elle ne donne plus que 12 % de ce qu'elle donnait fraîche. La fraîcheur vient d'une carte à
+    mailles de 3 cm, tenue par la bombe et les pinceaux ; le shader du papier la lit texel par texel (interpolée entre
+    les mailles) : une grosse boule posée sur un coin séché et un coin frais n'emporte que le frais. Elle n'est pas
+    enregistrée, et un projet rouvert est sec.
   - Un cache protège aussi du papier. Chaque appui (et chaque frottement) s'annule d'un coup ; les passes sont des
     rendus, comme le raclage.
+- **Chalumeau** : il vieillit la peinture de cette carte sous la flamme, jusqu'à 40 s par seconde au contact. La taille
+  de la flamme (3 à 30 cm, 6 par défaut) est la largeur de la zone chauffée au contact, qui s'élargit de 30 % de la
+  distance ; la chaleur décroît jusqu'à la portée de la flamme, 25 cm × √(taille / 6 cm), entre 18 et 50 cm. Une grande
+  flamme chauffe donc aussi fort par endroit qu'une petite, sur une plus grande surface ; elle est dessinée plus large
+  (taille^0,7) et plus longue. Il assèche aussi la
+  carte d'épaisseur de la bombe (plus de nouvelle coulure là) et arrête les coulures qui passent dans la zone. Il ne
+  touche pas aux couches de peinture : rien à annuler.
 - **Murs** :
   - 11 types : briques, briques peintes, parpaings, pierre, béton banché, crépi, tôle ondulée, palissade bois, carrelage métro, mur blanc, mur noir ;
   - taille réglable de 3 à 16 m de large et de 2 à 6 m de haut ; la peinture déjà faite reste à sa place, et Annuler rend le mur d'avant intact.
@@ -418,7 +489,8 @@ Détails techniques :
 | `js/stencils.js` | Caches : formes (fonctions de distance GLSL et JS), films 3D, pose / déplacement / retrait annulables |
 | `js/scraper.js` | Racloirs : géométrie de la lame, pression, angle d'attaque, modèles 3D |
 | `js/brush.js` | Pinceaux rond et plat : touffe de mèches, charge de chaque mèche, tranche, modèles 3D |
-| `js/newspaper.js` | Papier journal : motif de papier froissé (GLSL), appuis et frottements, fraîcheur de la peinture, boule de papier 3D |
+| `js/newspaper.js` | Papier journal : motif de papier froissé (GLSL), appuis, appui prolongé et frottements, tailles, fraîcheur de la peinture, boule de papier 3D |
+| `js/torch.js` | Chalumeau : séchage de la peinture fraîche et des coulures, flamme et lueur 3D |
 | `js/canvases.js` | Devantures peignables (surfaces créées à la demande, calques de peinture) |
 | `js/street.js` | Rue, immeubles, fenêtres et vitrines en profondeur (interior mapping), mobilier, réverbères |
 | `js/cars.js` | Voitures procédurales (profils extrudés et galbés) et circulation |
@@ -452,7 +524,10 @@ Le papier journal utilise les mêmes passes : il multiplie l'écart (visible −
 ### Pinceaux et papier journal
 
 `?test=outils` rejoue des gestes image par image et mesure le résultat sur des images du mur (2 mm par pixel, 1 mm
-pour les traits de pinceau) :
+pour les traits de pinceau) . Le froissage du papier et la graine de l'éponge y sont
+tirés d'une suite à graine fixe : d'une exécution à l'autre, les mêmes appuis donnent les mêmes motifs (tirés de
+`Math.random`, partagé avec le décor qui en consomme au rythme des images, ils changeaient, et des contrôles limites
+comme `PAPIER_DUREE` ou `TORCHE_SECHE` passaient ou échouaient selon le tirage) :
 
 | Contrôle | Ce qui est vérifié |
 |---|---|
@@ -463,19 +538,42 @@ pour les traits de pinceau) :
 | `PAPIER_FRAIS` | la peinture fraîche part mieux que la peinture récente |
 | `PAPIER_FOND_INTACT` | huit appuis forts au même endroit montrent le bleu presque entier, et toujours pas le mur |
 | `PAPIER_FROTTE` | frotter laisse une bande continue |
+| `PAPIER_DUREE` | à même pression, un appui prolongé (1,5 s) emporte bien plus qu'un appui bref |
+| `PAPIER_TAILLE` | la boule de 22 cm touche bien plus de surface que celle de 11 cm |
+| `TORCHE_SECHE` | sur une peinture fraîche passée 2 s sous la flamme, le papier emporte bien moins qu'à côté |
+| `TORCHE_LOCALE` | une boule de 22 cm sur un point chauffé de quelques centimètres : le centre résiste, le bord frais part |
+| `TORCHE_COULURES` | une coulure qui passe sous la flamme s'arrête ; la coulure voisine, sans flamme, continue |
 | `PINCEAU_CHARGE` | le long d'un trait de 2,3 m, la couverture baisse : le pinceau se vide |
 | `PINCEAU_POILS` | en travers du trait, le profil est strié ; au milieu, le trait se casse en traînées |
 | `PINCEAU_COULEUR` | le trait a la couleur en cours |
 | `PINCEAU_PLAT_TRANCHE` | le pinceau plat en travers du geste couvre une bande ; de chant, un filet |
 | `PINCEAU_TAILLES` | le pinceau rond de 5 cm trace bien plus large que celui de 1 cm |
+| `TORCHE_TAILLE` | flamme de 6 cm et flamme de 24 cm, 2 s chacune sur une tache fraîche : les deux sèchent leur centre, seule la grande sèche aussi à 10 cm |
+| `EPONGE_POREUX` | un appui d'éponge laisse des trous au centre et alterne encre et trous le long d'une ligne (pores) |
+| `EPONGE_COULEUR` | l'empreinte a la couleur en cours |
+| `EPONGE_CHAQUE_APPUI` | deux appuis identiques ne donnent pas le même motif (corrélation faible) |
+| `EPONGE_PRESSION` | un appui fort encre bien plus de surface qu'un appui léger |
+| `EPONGE_TAILLE` | l'éponge de 16 cm encre bien plus de surface que celle de 4 cm |
+| `EPONGE_CHARGE` | six appuis rapprochés : avec la charge réaliste, les deux derniers pâlissent nettement par rapport aux trois premiers ; sans, ils encrent autant |
+| `EPONGE_FROTTE` | l'éponge frottée laisse une bande continue, striée dans le sens du geste |
+| `PINCEAU_SANS_CHARGE` | charge réaliste décochée : la fin d'un trait de 90 cm couvre autant que son début |
 | `UNDO` | annuler tous ces gestes rend les couches brutes (half-float) d'avant, au bit près |
 | `ENREGISTRE` | après un trait de pinceau, un appui et un frottement, enregistrer puis rouvrir rend les mêmes couches et la même image |
+| `FOND_CONTINU` | un voile noir sur du bleu : au bord du voile, le fond ne saute pas plus que la couche visible (sinon le papier y dessine les ronds des tampons) |
+| `PAPIER_SOUS_COUCHE_SECHE` | un voile noir frais sur du jaune séché au chalumeau : six appuis forts du papier emportent le noir, montrent le jaune et jamais le mur |
 
 `node tests/outils.mjs` (≈ 3 min, Chrome headless avec GPU D3D11, aucune fenêtre) lance `?test=outils`, puis vérifie
-le panneau du navigateur (boutons d'outil et de taille, HUD), les touches P et J, de vrais gestes de souris (trait de
-pinceau, tampon et frottement du papier sur de la peinture, Ctrl+Z), l'onglet Outils de la palette VR (8 outils, rien
-ne se chevauche ni ne descend sur les caps, appuis sur un outil et sur une taille), le doigt sur téléphone (trait,
-pincer = pression) et enfin `?test=caches`. Images dans `tmp/outils/`.
+le panneau du navigateur (boutons d'outil et de taille, barres de taille de l'éponge, de la boule de papier et de la
+flamme, case Charge réaliste, HUD), les touches P, G, J et T (y compris juste après un clic sur une case du panneau), de
+vrais gestes de souris (trait de pinceau, appui d'éponge, tampon et frottement du papier sur de la peinture, Ctrl+Z),
+l'onglet Outils de la palette VR (10 outils, barres de taille, rien ne se chevauche ni ne descend sur les caps, appuis
+sur un outil et sur une taille), le doigt sur téléphone (trait, pincer = pression) et enfin `?test=caches`. Images dans
+`tmp/outils/` (`6-eponge*.png` pour l'éponge).
+
+Chaque banc de test (`outils`, `casque`, `tactile`) commence par `tests/syntaxe.mjs` : tous les modules de `js/` sont
+analysés par Node avant d'ouvrir Chrome. Une erreur de syntaxe (une apostrophe non échappée dans un texte, par exemple)
+casserait la page entière et ferait échouer chaque contrôle sans dire pourquoi ; elle est signalée avec son fichier et
+sa ligne. Seul : `node tests/syntaxe.mjs`.
 
 Non vérifiable en headless, à essayer dans le casque : le contact des poils et de la boule de papier avec le mur,
 l'orientation de la tranche au poignet, les vibrations, la lisibilité de l'onglet Outils.

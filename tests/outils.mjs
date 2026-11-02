@@ -1,9 +1,14 @@
 // Papier journal et pinceaux, en Chrome headless piloté par CDP (aucune fenêtre, aucun son), GPU par D3D11.
 //   outils  : ?test=outils (VRPAINT_OUTILS_*) : le papier ne révèle que la couche sèche, motif net et
-//             différent à chaque appui, pression, fraîcheur, frottement ; pinceaux : charge qui s'épuise,
-//             traînées de poils, tranche du plat, tailles, couleur ; annulation exacte ; enregistrement ;
-//   ui      : panneau du navigateur (boutons d'outil et de taille), touches P et J, vrais gestes de souris
-//             (pinceau, papier sur de la peinture, Ctrl+Z), onglet Outils de la palette VR (régions, appuis) ;
+//             différent à chaque appui, pression, fraîcheur, durée d'appui, taille, frottement ;
+//             chalumeau : peinture séchée, coulures figées, grande flamme plus large ; pinceaux : charge qui
+//             s'épuise (ou non, option décochée), traînées de poils, tranche du plat, tailles, couleur ;
+//             éponge : grain poreux, appuis différents, pression, taille, charge, frottement ;
+//             annulation exacte ; enregistrement ;
+//             fond continu au bord d'un voile de bombe (pas de ronds nets au papier) ;
+//   ui      : panneau du navigateur (boutons d'outil, de taille, barres de l'éponge et de la flamme, option
+//             Charge réaliste), touches P, J, G et T, vrais gestes de souris (pinceau, éponge, papier sur de la
+//             peinture, Ctrl+Z), onglet Outils de la palette VR (régions, appuis, barres) ;
 //   touch   : téléphone émulé : un doigt peint au pinceau, pincer règle la pression ;
 //   caches  : ?test=caches toujours bon (annulation exacte, enregistrement).
 //
@@ -16,8 +21,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireValidSyntax } from './syntaxe.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+requireValidSyntax();
 const OUT = path.join(ROOT, 'tmp', 'outils');
 fs.mkdirSync(OUT, { recursive: true });
 const PHASES = process.argv.slice(2).length ? process.argv.slice(2) : ['outils', 'ui', 'touch', 'caches'];
@@ -127,7 +134,9 @@ async function phaseOutils() {
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await runPageTest(BASE + '?test=outils', 10);
   const expected = ['PAPIER_REVELE', 'PAPIER_NET', 'PAPIER_CHAQUE_APPUI', 'PAPIER_PRESSION', 'PAPIER_FRAIS', 'PAPIER_FOND_INTACT',
-    'PAPIER_FROTTE', 'PINCEAU_CHARGE', 'PINCEAU_POILS', 'PINCEAU_COULEUR', 'PINCEAU_PLAT_TRANCHE', 'PINCEAU_TAILLES', 'UNDO', 'ENREGISTRE'];
+    'PAPIER_FROTTE', 'PAPIER_DUREE', 'PAPIER_TAILLE', 'TORCHE_SECHE', 'TORCHE_LOCALE', 'TORCHE_COULURES', 'PINCEAU_CHARGE', 'PINCEAU_POILS', 'PINCEAU_COULEUR', 'PINCEAU_PLAT_TRANCHE', 'PINCEAU_TAILLES',
+    'TORCHE_TAILLE', 'EPONGE_POREUX', 'EPONGE_COULEUR', 'EPONGE_CHAQUE_APPUI', 'EPONGE_PRESSION', 'EPONGE_TAILLE', 'EPONGE_CHARGE', 'EPONGE_FROTTE', 'PINCEAU_SANS_CHARGE',
+    'UNDO', 'ENREGISTRE', 'FOND_CONTINU', 'PAPIER_SOUS_COUCHE_SECHE'];
   for (const name of expected) {
     const line = logs.find(l => l.startsWith(`VRPAINT_OUTILS_${name} `));
     check(name, / OK /.test(line || ''), line ? line.slice(`VRPAINT_OUTILS_${name} `.length) : 'absent');
@@ -167,7 +176,7 @@ async function phaseUI() {
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await load(BASE);
   await ev(`__vrpaint.set({ tool: 'bombe', distance: 0.15, pressure: 1, angle: 0, brushSizes: {} }), true`);
-  for (const id of ['pinceau-rond', 'pinceau-plat', 'journal']) {
+  for (const id of ['pinceau-rond', 'pinceau-plat', 'eponge', 'journal', 'chalumeau']) {
     await clickEl(`[data-tool="${id}"]`);
     check(`panneau : bouton ${id}`, (await tool()) === id);
   }
@@ -181,6 +190,43 @@ async function phaseUI() {
   check('touche P : pinceau rond ⇄ plat', (await tool()) === 'pinceau-rond');
   await key('KeyJ', 'j', 74);
   check('touche J : papier journal', (await tool()) === 'journal');
+  check('panneau : barre de taille du papier journal affichée', await ev(`!document.querySelector('[data-brush-opts="journal"]').hidden && !!document.querySelector('[data-size-range="journal"]') && !document.querySelector('[data-brush="journal"]')`));
+  const paperSlide = cm => ev(`(() => { const el = document.querySelector('[data-size-range="journal"]'); el.value = ${cm}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await paperSlide(22);
+  check('panneau : barre à 22 cm = boule de 22 cm', (await ev('__vrpaint.state.brushSizes.journal')) === 0.22 && /Papier journal 22 cm/.test(await ev(`document.getElementById('hud').textContent`))
+    && (await ev(`document.querySelector('[data-size-out="journal"]').textContent`)) === '22 cm', await ev(`document.getElementById('hud').textContent`));
+  await mouse('mouseMoved', 640, 400);
+  await sleep(200);
+  check('boule de papier tenue à la taille choisie', await ev(`(() => { const m = __vrpaint.newspaper.mesh; return m.visible && Math.abs(m.userData.ball.scale.x - 0.11 * 0.85) < 1e-6; })()`));
+  await paperSlide(11);
+  await key('KeyT', 't', 84);
+  check('touche T : chalumeau', (await tool()) === 'chalumeau');
+  await mouse('mouseMoved', 640, 400);
+  await sleep(200);
+  check('chalumeau en main, pas de bombe', await ev(`__vrpaint.torch.mesh.visible && !__vrpaint.world.can.visible && !__vrpaint.newspaper.mesh.visible`));
+  const slide = (id, cm) => ev(`(() => { const el = document.querySelector('[data-size-range="${id}"]'); el.value = ${cm}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  check('panneau : barre de taille de la flamme affichée', await ev(`!document.querySelector('[data-brush-opts="chalumeau"]').hidden && !!document.querySelector('[data-size-range="chalumeau"]')`));
+  await slide('chalumeau', 20);
+  await sleep(200);
+  check('panneau : barre à 20 cm = flamme de 20 cm (portée plus longue)', (await ev('__vrpaint.state.brushSizes.chalumeau')) === 0.2
+    && /flamme 20 cm/.test(await ev(`document.getElementById('hud').textContent`)) && (await ev('__vrpaint.torch.reach')) > 0.4, await ev(`document.getElementById('hud').textContent`));
+  await slide('chalumeau', 6);
+  await key('KeyG', 'g', 71);
+  check('touche G : éponge', (await tool()) === 'eponge');
+  check('panneau : barre de taille de l\'éponge et son aide', await ev(`!document.querySelector('[data-brush-opts="eponge"]').hidden && !!document.querySelector('[data-size-range="eponge"]') && !document.getElementById('sponge-help').hidden`));
+  await slide('eponge', 14);
+  await mouse('mouseMoved', 640, 400);
+  await sleep(200);
+  check('éponge tenue à la taille choisie', (await ev('__vrpaint.state.brushSizes.eponge')) === 0.14
+    && await ev(`(() => { const m = __vrpaint.sponge.mesh; return m.visible && Math.abs(m.userData.body.scale.x - 0.07) < 1e-6 && !__vrpaint.world.can.visible; })()`));
+  await slide('eponge', 8);
+  check('panneau : option Charge réaliste (cochée par défaut)', await ev(`document.getElementById('realLoad').checked && __vrpaint.state.realLoad`));
+  await clickEl('#realLoad');
+  check('Charge réaliste décochée', (await ev('__vrpaint.state.realLoad')) === false);
+  await clickEl('#realLoad');
+  // juste après un clic sur une case du panneau, les lettres restent des raccourcis
+  await key('KeyJ', 'j', 74);
+  check('touche J juste après la case : papier journal', (await tool()) === 'journal');
 
   // vrais gestes de souris
   await key('KeyB', 'b', 66);
@@ -198,7 +244,8 @@ async function phaseUI() {
   }
   await mouse('mouseReleased', 480, 420, 'left', 0);
   await sleep(300);
-  check('bombe : un aplat à frotter', (await paintDiff()) > 200 && (await hist()) === h0 + 1);
+  const flat = await paintDiff();
+  check('bombe : un aplat à frotter', flat > 200 && (await hist()) === h0 + 1, `pixels=${flat} gestes=${(await hist()) - h0}`);
   await sleep(4200);   // la peinture « prend » un peu
   await paintBase(1600, 600);
   h0 = await hist();
@@ -217,6 +264,19 @@ async function phaseUI() {
   await key('KeyZ', 'z', 90, 2);
   await sleep(300);
   check('Ctrl+Z ×2 : le papier est annulé', (await paintDiff(1600, 600)) === 0);
+  await key('KeyG', 'g', 71);
+  await paintBase(1600, 600);
+  h0 = await hist();
+  await mouse('mouseMoved', 520, 470);
+  await mouse('mousePressed', 520, 470, 'left', 1);
+  await sleep(250);
+  await mouse('mouseReleased', 520, 470, 'left', 0);
+  await sleep(300);
+  const spongeTap = await paintDiff(1600, 600);
+  check('éponge : un clic tamponne (un geste annulable)', spongeTap > 20 && (await hist()) === h0 + 1, `pixels=${spongeTap}`);
+  await key('KeyZ', 'z', 90, 2);
+  await sleep(300);
+  check('Ctrl+Z : l\'appui d\'éponge est annulé', (await paintDiff(1600, 600)) === 0);
   await key('KeyP', 'p', 80);
   await mouse('mouseMoved', 520, 470);
   await sleep(300);
@@ -235,7 +295,7 @@ async function phaseUI() {
   const pal = await ev(`(() => {
     const v = __vrpaint, P = v.palette, out = { tools: [], overlaps: [], outside: [], sizes: 0 };
     P.tab = 'tools';
-    for (const t of ['bombe', 'pinceau-rond', 'pinceau-plat', 'cache', 'couteau', 'journal']) {
+    for (const t of ['bombe', 'pinceau-rond', 'pinceau-plat', 'eponge', 'cache', 'couteau', 'journal', 'chalumeau']) {
       v.set({ tool: t });
       P.draw();
       const R = P.regions.filter(r => r.y > 216 && r.y < 1296);
@@ -250,14 +310,31 @@ async function phaseUI() {
         P.press({ region: r });
         out.sized = v.state.brushSizes['pinceau-rond'];
       }
+      if (t === 'journal') {
+        // barre de taille : glisser jusqu'aux 11/25 de la barre (5 à 30 cm) = 16 cm
+        const r = P.regions.find(r => r.type === 'sizeRange' && r.id === 'journal');
+        out.paperBar = !!r && !P.regions.some(r => r.type === 'brushSize');
+        if (r) P.press({ region: r, px: r.x + r.w * 11 / 25, py: r.y + r.h / 2 });
+        out.paperSized = v.state.brushSizes.journal;
+        v.set({ brushSizes: { ...v.state.brushSizes, journal: 0.11 } });
+      }
+      if (t === 'eponge' || t === 'chalumeau') {
+        // barre de taille : glisser à mi-course
+        const r = P.regions.find(r => r.type === 'sizeRange' && r.id === t);
+        if (r) P.press({ region: r, px: r.x + r.w / 2, py: r.y + r.h / 2 });
+        out[t] = !!r && v.state.brushSizes[t];
+        v.set({ brushSizes: { ...v.state.brushSizes, [t]: undefined } });
+      }
     }
     P.press({ region: P.regions.find(r => r.type === 'tool' && r.id === 'pinceau-plat') });
     out.pressed = v.state.tool;
     return out;
   })()`);
-  check('palette VR : les 8 outils', ['bombe', 'pinceau-rond', 'pinceau-plat', 'cache', 'couteau', 'spatule', 'grattoir', 'journal'].every(id => pal.tools.includes(id)), pal.tools.join(','));
+  check('palette VR : les 10 outils', ['bombe', 'pinceau-rond', 'pinceau-plat', 'eponge', 'cache', 'couteau', 'spatule', 'grattoir', 'journal', 'chalumeau'].every(id => pal.tools.includes(id)), pal.tools.join(','));
   check('palette VR : rien ne se chevauche ni ne déborde sur les caps', !pal.overlaps.length && !pal.outside.length, [...pal.overlaps, ...pal.outside].join(' '));
   check('palette VR : 3 tailles, appui = taille choisie', pal.sizes === 3 && pal.sized === 0.05);
+  check('palette VR : barre de taille du papier journal (glisser = 16 cm)', pal.paperBar && pal.paperSized === 0.16, `${pal.paperBar} / ${pal.paperSized}`);
+  check('palette VR : barres de l\'éponge (mi-course : 11 ou 12 cm) et de la flamme (16 ou 17 cm)', [0.11, 0.12].includes(pal.eponge) && [0.16, 0.17].includes(pal.chalumeau), `${pal.eponge} / ${pal.chalumeau}`);
   check('palette VR : appui sur un outil', pal.pressed === 'pinceau-plat');
   await ev(`(() => { const c = __vrpaint.palette.canvas; window.__pal = c.toDataURL('image/png'); return true; })()`);
   fs.writeFileSync(path.join(OUT, 'palette-outils.png'), Buffer.from((await ev('window.__pal')).split(',')[1], 'base64'));
@@ -319,7 +396,8 @@ try {
 } finally {
   const bad = results.filter(r => !r.ok).length;
   console.log(bad ? `RESULTAT ${bad} échec(s) sur ${results.length}` : `RESULTAT TOUT OK (${results.length})`);
-  try { await send('Browser.close'); } catch { /* fermé */ }
+  // Chrome peut se fermer sans répondre : on n'attend pas plus d'une seconde
+  try { await Promise.race([send('Browser.close'), sleep(1000)]); } catch { /* fermé */ }
   chrome.kill();
   server.close();
   setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* verrou */ } process.exit(bad ? 1 : 0); }, 800);
